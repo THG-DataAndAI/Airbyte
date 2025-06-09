@@ -17,8 +17,7 @@ on:
       destroy:
         description: 'Destroy infrastructure'
         required: false
-        default: false
-        type: boolean
+        default: 'false'
 
 env:
   PROJECT_ID: thg-dev-icehouse
@@ -27,10 +26,24 @@ env:
   DOMAIN: ${{ github.event.inputs.domain }}
 
 jobs:
+  debug-inputs:
+    name: Debug Workflow Inputs
+    runs-on: self-hosted
+    steps:
+    - name: Display inputs
+      run: |
+        echo "=== Workflow Inputs ==="
+        echo "Cluster Name: ${{ github.event.inputs.cluster_name }}"
+        echo "Region: ${{ github.event.inputs.region }}"
+        echo "Domain: ${{ github.event.inputs.domain }}"
+        echo "Destroy: ${{ github.event.inputs.destroy }}"
+        echo "Destroy != 'true': ${{ github.event.inputs.destroy != 'true' }}"
+        echo "========================"
+
   setup-infrastructure:
     name: Setup GKE Infrastructure
     runs-on: self-hosted
-    if: ${{ !github.event.inputs.destroy }}
+    if: ${{ !contains(github.event.inputs.destroy, 'true') }}
     
     steps:
     - name: Checkout
@@ -89,9 +102,9 @@ jobs:
 
   setup-dns:
     name: Setup DNS
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: setup-infrastructure
-    if: ${{ !github.event.inputs.destroy }}
+    if: ${{ !contains(github.event.inputs.destroy, 'true') }}
     
     steps:
     - name: Setup Google Cloud CLI
@@ -121,9 +134,9 @@ jobs:
 
   deploy-postgres:
     name: Deploy PostgreSQL
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: setup-infrastructure
-    if: ${{ !github.event.inputs.destroy }}
+    if: ${{ !contains(github.event.inputs.destroy, 'true') }}
     
     steps:
     - name: Checkout
@@ -228,9 +241,9 @@ jobs:
 
   deploy-airbyte:
     name: Deploy Airbyte
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: [setup-infrastructure, deploy-postgres]
-    if: ${{ !github.event.inputs.destroy }}
+    if: ${{ !contains(github.event.inputs.destroy, 'true') }}
     
     steps:
     - name: Checkout
@@ -315,8 +328,8 @@ jobs:
 
   cleanup:
     name: Cleanup Infrastructure
-    runs-on: ubuntu-latest
-    if: ${{ github.event.inputs.destroy == 'true' }}
+    runs-on: self-hosted
+    if: ${{ contains(github.event.inputs.destroy, 'true') }}
     
     steps:
     - name: Setup Google Cloud CLI
