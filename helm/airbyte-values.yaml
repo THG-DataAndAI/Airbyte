@@ -1,9 +1,8 @@
 global:
   database:
     secretName: "airbyte-db-secret"
-    secretValue: "DATABASE_PASSWORD"
-    password: "${DB_PASSWORD}"
-    host: "postgres-service.airbyte.svc.cluster.local"
+    secretValue: "password"
+    host: "postgres-service"  # Remove the FQDN, just use service name
     port: "5432"
     database: "airbyte"
     user: "airbyte"
@@ -59,6 +58,11 @@ server:
   env_vars:
     CONFIGS_DATABASE_MINIMUM_FLYWAY_MIGRATION_VERSION: "0.29.15.001"
     JOBS_DATABASE_MINIMUM_FLYWAY_MIGRATION_VERSION: "0.29.17.001"
+    DATABASE_HOST: "postgres-service"
+    DATABASE_PORT: "5432"
+    DATABASE_DB: "airbyte"
+    DATABASE_USER: "airbyte"
+    DATABASE_URL: "jdbc:postgresql://postgres-service:5432/airbyte"
 
 worker:
   replicaCount: 1
@@ -74,6 +78,10 @@ worker:
     ACTIVITY_INITIAL_DELAY_BETWEEN_ATTEMPTS_SECONDS: "30"
     ACTIVITY_MAX_DELAY_BETWEEN_ATTEMPTS_SECONDS: "600"
     ACTIVITY_MAX_TIMEOUT_SECOND: "120"
+    DATABASE_HOST: "postgres-service"
+    DATABASE_PORT: "5432"
+    DATABASE_DB: "airbyte"
+    DATABASE_USER: "airbyte"
 
 airbyte-bootloader:
   enabled: true
@@ -84,6 +92,19 @@ airbyte-bootloader:
     limits:
       memory: "512Mi"
       cpu: "250m"
+  env_vars:
+    DATABASE_HOST: "postgres-service"
+    DATABASE_PORT: "5432"
+    DATABASE_DB: "airbyte"
+    DATABASE_USER: "airbyte"
+
+workload-launcher:
+  enabled: true
+  env_vars:
+    DATABASE_HOST: "postgres-service"
+    DATABASE_PORT: "5432"
+    DATABASE_DB: "airbyte"
+    DATABASE_USER: "airbyte"
 
 temporal:
   enabled: true
