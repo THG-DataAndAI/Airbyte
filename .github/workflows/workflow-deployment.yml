@@ -92,6 +92,11 @@ jobs:
       run: |
         kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
 
+    - name: Create service account
+      if: github.event.inputs.action == 'deploy'
+      run: |
+        kubectl create serviceaccount airbyte -n ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+
     - name: Install cert-manager
       if: github.event.inputs.action == 'deploy'
       run: |
