@@ -278,7 +278,7 @@ jobs:
 
     - name: Update Airbyte values with domain
       run: |-
-        sed -i "s/DOMAIN_PLACEHOLDER/$DOMAIN/g" helm/airbyte-values.yaml
+        sed -i "s|DOMAIN_PLACEHOLDER|$DOMAIN|g" helm/airbyte-values.yaml
 
     - name: Create database secret
       run: |-
