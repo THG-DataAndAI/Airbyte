@@ -278,7 +278,10 @@ jobs:
 
     - name: Update Airbyte values with domain
       run: |-
+        # Get the PostgreSQL password
+        DB_PASSWORD=$(kubectl get secret postgres-secret -n airbyte -o jsonpath="{.data.postgres-password}" | base64 --decode)
         export DOMAIN_PLACEHOLDER="$DOMAIN"
+        export DB_PASSWORD="$DB_PASSWORD"
         envsubst < helm/airbyte-values.yaml > helm/airbyte-values-updated.yaml
         mv helm/airbyte-values-updated.yaml helm/airbyte-values.yaml
 
