@@ -1,8 +1,8 @@
 global:
   serviceAccountName: airbyte
   deploymentMode: oss
-  configMapName: airbyte-env
-  secretName: airbyte-secrets
+  configMapName: airbyte-airbyte-env
+  secretName: airbyte-airbyte-secrets
   database:
     secretName: airbyte-db-secrets
     secretValue: DATABASE_PASSWORD
