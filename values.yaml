@@ -10,6 +10,7 @@ global:
     port: "5432"
     database: airbyte
     user: airbyte
+    password: ""  # This will be overridden by secretName/secretValue
   logs:
     accessKey:
       password: minio
@@ -74,14 +75,14 @@ worker:
 airbyte-bootloader:
   enabled: true
   env:
-    - name: CONFIG_DATABASE_USER
+    - name: DATABASE_USER
       value: "airbyte"
-    - name: CONFIG_DATABASE_PASSWORD
+    - name: DATABASE_PASSWORD
       valueFrom:
         secretKeyRef:
           name: airbyte-db-secrets
           key: DATABASE_PASSWORD
-    - name: CONFIG_DATABASE_URL
+    - name: DATABASE_URL
       value: "jdbc:postgresql://airbyte-db-postgresql:5432/airbyte"
 
 temporal:
@@ -96,6 +97,7 @@ externalDatabase:
   port: 5432
   database: airbyte
   user: airbyte
+  password: ""  # Will use existingSecret instead
   existingSecret: airbyte-db-secrets
   existingSecretPasswordKey: DATABASE_PASSWORD
 
