@@ -288,7 +288,7 @@ jobs:
     - name: Create database secret
       run: |-
         kubectl create secret generic airbyte-db-secret \
-          --from-literal=password="${{ steps.get_pg_password.outputs.pg_password }}" \
+          --from-literal=DATABASE_PASSWORD="${{ steps.get_pg_password.outputs.pg_password }}" \
           --namespace=airbyte || true
 
     - name: Create SSL certificate
