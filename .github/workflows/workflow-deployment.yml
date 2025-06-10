@@ -192,6 +192,32 @@ jobs:
           -n ${{ env.NAMESPACE }} \
           --timeout=300s
 
+    - name: Create Airbyte ConfigMaps
+      if: github.event.inputs.action == 'deploy'
+      run: |
+        # Create the base airbyte-env configmap
+        kubectl create configmap airbyte-env \
+          --namespace=${{ env.NAMESPACE }} \
+          --from-literal=AIRBYTE_VERSION=0.50.0 \
+          --from-literal=RUN_DATABASE_MIGRATION_ON_STARTUP=true \
+          --dry-run=client -o yaml | kubectl apply -f -
+        
+        # Create the airbyte-airbyte-env configmap with additional settings
+        kubectl create configmap airbyte-airbyte-env \
+          --namespace=${{ env.NAMESPACE }} \
+          --from-literal=AIRBYTE_VERSION=0.50.0 \
+          --from-literal=AIRBYTE_EDITION=community \
+          --from-literal=DATABASE_HOST=airbyte-db-postgresql \
+          --from-literal=DATABASE_PORT=5432 \
+          --from-literal=DATABASE_DB=airbyte \
+          --from-literal=DATABASE_URL=jdbc:postgresql://airbyte-db-postgresql:5432/airbyte \
+          --from-literal=TRACKING_STRATEGY=segment \
+          --from-literal=MICROMETER_METRICS_ENABLED=false \
+          --from-literal=MICROMETER_METRICS_STATSD_ENABLED=false \
+          --from-literal=STATSD_HOST=localhost \
+          --from-literal=STATSD_PORT=8125 \
+          --dry-run=client -o yaml | kubectl apply -f -
+
     - name: Deploy Airbyte
       if: github.event.inputs.action == 'deploy'
       run: |
