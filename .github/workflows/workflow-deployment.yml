@@ -26,6 +26,7 @@ env:
 jobs:
   deploy:
     runs-on: self-hosted
+    environment: dev
     
     steps:
     - name: Checkout code
@@ -139,6 +140,28 @@ jobs:
           --namespace=${{ env.NAMESPACE }} \
           --from-literal=DATABASE_PASSWORD=${{ secrets.AIRBYTE_DB_PASSWORD }} \
           --dry-run=client -o yaml | kubectl apply -f -
+
+    - name: Validate secrets
+      if: github.event.inputs.action == 'deploy'
+      run: |
+        # Check if required secrets are set
+        if [ -z "${{ secrets.AIRBYTE_DB_PASSWORD }}" ]; then
+          echo "ERROR: AIRBYTE_DB_PASSWORD secret is not set!"
+          echo "Please add this secret in your repository settings:"
+          echo "Settings → Secrets and variables → Actions → New repository secret"
+          echo ""
+          echo "You can generate a strong password with:"
+          echo "openssl rand -base64 32"
+          exit 1
+        fi
+        
+        if [ -z "${{ secrets.LETSENCRYPT_EMAIL }}" ]; then
+          echo "ERROR: LETSENCRYPT_EMAIL secret is not set!"
+          echo "Please add this secret in your repository settings."
+          exit 1
+        fi
+        
+        echo "All required secrets are configured ✓"
 
     - name: Deploy PostgreSQL
       if: github.event.inputs.action == 'deploy'
