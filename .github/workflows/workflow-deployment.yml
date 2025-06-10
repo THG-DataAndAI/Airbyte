@@ -170,6 +170,7 @@ jobs:
         helm upgrade --install airbyte airbyte/airbyte \
           --namespace=${{ env.NAMESPACE }} \
           --values values.yaml \
+          --set global.database.user=airbyte \
           --set global.database.password=${{ secrets.AIRBYTE_DB_PASSWORD }} \
           --timeout 15m \
           --wait
