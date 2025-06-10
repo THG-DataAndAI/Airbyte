@@ -1,0 +1,120 @@
+# Airbyte Helm Chart Values
+global:
+  serviceAccountName: airbyte
+  deploymentMode: oss
+  configMapName: airbyte-env
+  secretName: airbyte-secrets
+  database:
+    secretName: airbyte-db-secrets
+    secretValue: DATABASE_PASSWORD
+    host: airbyte-db-postgresql
+    port: "5432"
+    database: airbyte
+  logs:
+    accessKey:
+      password: minio
+      existingSecret: ""
+      existingSecretKey: ""
+    secretKey:
+      password: minio123
+      existingSecret: ""
+      existingSecretKey: ""
+
+webapp:
+  enabled: true
+  replicaCount: 1
+  service:
+    type: ClusterIP
+    port: 80
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+      nginx.ingress.kubernetes.io/proxy-body-size: "0"
+      nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+      nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+    hosts:
+      - host: airbyte.thg.dev
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: airbyte-tls
+        hosts:
+          - airbyte.thg.dev
+
+server:
+  enabled: true
+  replicaCount: 1
+  env:
+    - name: TRACKING_STRATEGY
+      value: "segment"
+    - name: AIRBYTE_VERSION
+      value: "0.50.0"
+    - name: CONFIG_DATABASE_USER
+      value: "airbyte"
+    - name: CONFIG_DATABASE_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: airbyte-db-secrets
+          key: DATABASE_PASSWORD
+    - name: CONFIG_DATABASE_URL
+      value: "jdbc:postgresql://airbyte-db-postgresql:5432/airbyte"
+
+worker:
+  enabled: true
+  replicaCount: 1
+  env:
+    - name: SYNC_JOB_MAX_ATTEMPTS
+      value: "3"
+    - name: SYNC_JOB_MAX_TIMEOUT_DAYS
+      value: "3"
+
+airbyte-bootloader:
+  enabled: true
+  env:
+    - name: CONFIG_DATABASE_USER
+      value: "airbyte"
+    - name: CONFIG_DATABASE_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: airbyte-db-secrets
+          key: DATABASE_PASSWORD
+    - name: CONFIG_DATABASE_URL
+      value: "jdbc:postgresql://airbyte-db-postgresql:5432/airbyte"
+
+temporal:
+  enabled: true
+  replicaCount: 1
+
+postgresql:
+  enabled: false  # We'll use external PostgreSQL
+
+externalDatabase:
+  host: airbyte-db-postgresql
+  port: 5432
+  database: airbyte
+  user: airbyte
+  existingSecret: airbyte-db-secrets
+  existingSecretPasswordKey: DATABASE_PASSWORD
+
+minio:
+  enabled: true
+  auth:
+    rootUser: minio
+    rootPassword: minio123
+
+# Resource limits
+resources:
+  limits:
+    cpu: 1000m
+    memory: 2Gi
+  requests:
+    cpu: 500m
+    memory: 1Gi
+
+# Pod disruption budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
