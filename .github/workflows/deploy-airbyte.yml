@@ -269,27 +269,27 @@ jobs:
         helm repo add airbyte https://airbytehq.github.io/helm-charts
         helm repo update
 
-    - name: Get PostgreSQL password
-      id: get_pg_password
-      run: |-
-        PG_PASSWORD=$(kubectl get secret postgres-secret -n airbyte -o jsonpath="{.data.postgres-password}" | base64 --decode)
-        echo "::add-mask::$PG_PASSWORD"
-        echo "pg_password=$PG_PASSWORD" >> $GITHUB_OUTPUT
-
-    - name: Update Airbyte values with domain
+    - name: Create database secret with PostgreSQL password
       run: |-
         # Get the PostgreSQL password
-        DB_PASSWORD=$(kubectl get secret postgres-secret -n airbyte -o jsonpath="{.data.postgres-password}" | base64 --decode)
-        export DOMAIN_PLACEHOLDER="$DOMAIN"
-        export DB_PASSWORD="$DB_PASSWORD"
-        envsubst < helm/airbyte-values.yaml > helm/airbyte-values-updated.yaml
-        mv helm/airbyte-values-updated.yaml helm/airbyte-values.yaml
-
-    - name: Create database secret
-      run: |-
+        PG_PASSWORD=$(kubectl get secret postgres-secret -n airbyte -o jsonpath="{.data.postgres-password}" | base64 --decode)
+        echo "::add-mask::$PG_PASSWORD"
+        
+        # Delete any existing secret
+        kubectl delete secret airbyte-db-secret -n airbyte || true
+        
+        # Create the secret with the actual password
         kubectl create secret generic airbyte-db-secret \
-          --from-literal=DATABASE_PASSWORD="${{ steps.get_pg_password.outputs.pg_password }}" \
-          --namespace=airbyte || true
+          --from-literal=password="$PG_PASSWORD" \
+          --namespace=airbyte
+        
+        # Verify the secret was created correctly
+        SECRET_CHECK=$(kubectl get secret airbyte-db-secret -n airbyte -o jsonpath='{.data.password}' | base64 -d | wc -c)
+        echo "Secret password length: $SECRET_CHECK"
+        if [ "$SECRET_CHECK" -eq 0 ]; then
+          echo "ERROR: Database secret is empty!"
+          exit 1
+        fi
 
     - name: Create SSL certificate
       run: |-
