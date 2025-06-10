@@ -269,27 +269,27 @@ jobs:
         helm repo add airbyte https://airbytehq.github.io/helm-charts
         helm repo update
 
-    - name: Create database secret with PostgreSQL password
+    - name: Get PostgreSQL password
+      id: get_pg_password
       run: |-
-        # Get the PostgreSQL password
         PG_PASSWORD=$(kubectl get secret postgres-secret -n airbyte -o jsonpath="{.data.postgres-password}" | base64 --decode)
         echo "::add-mask::$PG_PASSWORD"
-        
-        # Delete any existing secret
-        kubectl delete secret airbyte-db-secret -n airbyte || true
-        
-        # Create the secret with the actual password
+        echo "pg_password=$PG_PASSWORD" >> $GITHUB_OUTPUT
+
+    - name: Update Airbyte values with domain
+      run: |-
+        # Get the PostgreSQL password
+        DB_PASSWORD=$(kubectl get secret postgres-secret -n airbyte -o jsonpath="{.data.postgres-password}" | base64 --decode)
+        export DOMAIN_PLACEHOLDER="$DOMAIN"
+        export DB_PASSWORD="$DB_PASSWORD"
+        envsubst < helm/airbyte-values.yaml > helm/airbyte-values-updated.yaml
+        mv helm/airbyte-values-updated.yaml helm/airbyte-values.yaml
+
+    - name: Create database secret
+      run: |-
         kubectl create secret generic airbyte-db-secret \
-          --from-literal=password="$PG_PASSWORD" \
-          --namespace=airbyte
-        
-        # Verify the secret was created correctly
-        SECRET_CHECK=$(kubectl get secret airbyte-db-secret -n airbyte -o jsonpath='{.data.password}' | base64 -d | wc -c)
-        echo "Secret password length: $SECRET_CHECK"
-        if [ "$SECRET_CHECK" -eq 0 ]; then
-          echo "ERROR: Database secret is empty!"
-          exit 1
-        fi
+          --from-literal=DATABASE_PASSWORD="${{ steps.get_pg_password.outputs.pg_password }}" \
+          --namespace=airbyte || true
 
     - name: Create SSL certificate
       run: |-
@@ -306,168 +306,9 @@ jobs:
 
     - name: Install Airbyte
       run: |-
-        # Get the PostgreSQL password
-        DB_PASSWORD=$(kubectl get secret postgres-secret -n airbyte -o jsonpath="{.data.postgres-password}" | base64 --decode)
-        echo "::add-mask::$DB_PASSWORD"
-        
-        # Create a single comprehensive values file with all configurations
-        cat > helm/install-values.yaml <<EOF
-        global:
-          database:
-            secretName: "airbyte-db-secret"
-            secretValue: "password"
-            password: "$DB_PASSWORD"
-            host: "postgres-service"
-            port: "5432"
-            database: "airbyte"
-            user: "airbyte"
-          
-          env_vars:
-            AIRBYTE_VERSION: "0.50.33"
-            API_URL: "/api/v1/"
-            CONNECTOR_BUILDER_API_URL: "/connector-builder-api"
-            INTERNAL_API_HOST: "airbyte-airbyte-server-svc:8001"
-            WEBAPP_URL: "https://$DOMAIN"
-            WORKER_ENVIRONMENT: "kubernetes"
-            WORKSPACE_ROOT: "/tmp/workspace"
-            WORKSPACE_DOCKER_MOUNT: "airbyte_workspace"
-            LOCAL_ROOT: "/tmp/airbyte_local"
-            CONFIG_ROOT: "/data"
-            TRACKING_STRATEGY: "segment"
-            JOB_MAIN_CONTAINER_CPU_REQUEST: "0.1"
-            JOB_MAIN_CONTAINER_CPU_LIMIT: "1.0"
-            JOB_MAIN_CONTAINER_MEMORY_REQUEST: "0.2Gi"
-            JOB_MAIN_CONTAINER_MEMORY_LIMIT: "1Gi"
-        
-        webapp:
-          replicaCount: 1
-          service:
-            type: ClusterIP
-          ingress:
-            enabled: true
-            className: "gce"
-            annotations:
-              kubernetes.io/ingress.global-static-ip-name: "airbyte-ip"
-              networking.gke.io/managed-certificates: "airbyte-ssl-cert"
-              kubernetes.io/ingress.allow-http: "false"
-            hosts:
-              - host: $DOMAIN
-                paths:
-                  - path: /
-                    pathType: Prefix
-        
-        server:
-          replicaCount: 1
-          resources:
-            requests:
-              memory: "512Mi"
-              cpu: "250m"
-            limits:
-              memory: "1Gi"
-              cpu: "500m"
-          env_vars:
-            CONFIGS_DATABASE_MINIMUM_FLYWAY_MIGRATION_VERSION: "0.29.15.001"
-            JOBS_DATABASE_MINIMUM_FLYWAY_MIGRATION_VERSION: "0.29.17.001"
-          extraEnv:
-            - name: DATABASE_PASSWORD
-              value: "$DB_PASSWORD"
-            - name: DATABASE_URL
-              value: "jdbc:postgresql://postgres-service:5432/airbyte"
-            - name: DATABASE_HOST
-              value: "postgres-service"
-            - name: DATABASE_PORT
-              value: "5432"
-            - name: DATABASE_DB
-              value: "airbyte"
-            - name: DATABASE_USER
-              value: "airbyte"
-        
-        worker:
-          replicaCount: 1
-          resources:
-            requests:
-              memory: "512Mi"
-              cpu: "250m"
-            limits:
-              memory: "2Gi"
-              cpu: "1000m"
-          extraEnv:
-            - name: DATABASE_PASSWORD
-              value: "$DB_PASSWORD"
-            - name: DATABASE_HOST
-              value: "postgres-service"
-            - name: DATABASE_PORT
-              value: "5432"
-            - name: DATABASE_DB
-              value: "airbyte"
-            - name: DATABASE_USER
-              value: "airbyte"
-        
-        workload-launcher:
-          enabled: true
-          extraEnv:
-            - name: DATABASE_PASSWORD
-              value: "$DB_PASSWORD"
-            - name: DATABASE_URL
-              value: "jdbc:postgresql://postgres-service:5432/airbyte"
-            - name: DATABASE_HOST
-              value: "postgres-service"
-            - name: DATABASE_PORT
-              value: "5432"
-            - name: DATABASE_DB
-              value: "airbyte"
-            - name: DATABASE_USER
-              value: "airbyte"
-        
-        airbyte-bootloader:
-          enabled: true
-          extraEnv:
-            - name: DATABASE_PASSWORD
-              value: "$DB_PASSWORD"
-            - name: DATABASE_URL
-              value: "jdbc:postgresql://postgres-service:5432/airbyte"
-            - name: DATABASE_HOST
-              value: "postgres-service"
-            - name: DATABASE_PORT
-              value: "5432"
-            - name: DATABASE_DB
-              value: "airbyte"
-            - name: DATABASE_USER
-              value: "airbyte"
-        
-        temporal:
-          enabled: true
-          persistence:
-            enabled: true
-            size: 10Gi
-            storageClass: "standard-rwo"
-        
-        minio:
-          enabled: true
-          persistence:
-            enabled: true
-            size: 10Gi
-            storageClass: "standard-rwo"
-        
-        postgresql:
-          enabled: false
-        
-        metrics:
-          enabled: true
-        
-        logs:
-          s3:
-            enabled: false
-          gcs:
-            enabled: false
-          minio:
-            enabled: true
-        EOF
-        
-        # Install Airbyte with the complete values file
         helm upgrade --install airbyte airbyte/airbyte \
           --namespace airbyte \
-          --values helm/install-values.yaml \
+          --values helm/airbyte-values.yaml \
           --timeout 10m \
           --wait
 
