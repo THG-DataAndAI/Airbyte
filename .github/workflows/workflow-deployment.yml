@@ -167,11 +167,23 @@ jobs:
     - name: Deploy Airbyte
       if: github.event.inputs.action == 'deploy'
       run: |
+        # First, let's check the Helm chart version and values
+        helm show values airbyte/airbyte > default-values.yaml
+        
+        # Deploy Airbyte with proper database configuration
         helm upgrade --install airbyte airbyte/airbyte \
           --namespace=${{ env.NAMESPACE }} \
           --values values.yaml \
           --set global.database.user=airbyte \
           --set global.database.password=${{ secrets.AIRBYTE_DB_PASSWORD }} \
+          --set global.database.existingSecret="" \
+          --set postgresql.enabled=false \
+          --set externalDatabase.host=airbyte-db-postgresql \
+          --set externalDatabase.user=airbyte \
+          --set externalDatabase.password=${{ secrets.AIRBYTE_DB_PASSWORD }} \
+          --set externalDatabase.existingSecret="" \
+          --set externalDatabase.database=airbyte \
+          --set externalDatabase.port=5432 \
           --timeout 15m \
           --wait
 
