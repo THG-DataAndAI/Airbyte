@@ -306,9 +306,80 @@ jobs:
 
     - name: Install Airbyte
       run: |-
+        # Get the PostgreSQL password
+        DB_PASSWORD=$(kubectl get secret postgres-secret -n airbyte -o jsonpath="{.data.postgres-password}" | base64 --decode)
+        
+        # Create a comprehensive values override file
+        cat > helm/values-override.yaml <<EOF
+        global:
+          database:
+            secretName: "airbyte-db-secret"
+            secretValue: "password"
+            host: "postgres-service"
+            port: "5432"
+            database: "airbyte"
+            user: "airbyte"
+        
+        server:
+          extraEnv:
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: airbyte-db-secret
+                  key: password
+            - name: DATABASE_URL
+              value: "jdbc:postgresql://postgres-service:5432/airbyte"
+            - name: DATABASE_HOST
+              value: "postgres-service"
+            - name: DATABASE_PORT
+              value: "5432"
+            - name: DATABASE_DB
+              value: "airbyte"
+            - name: DATABASE_USER
+              value: "airbyte"
+            - name: CONFIGS_DATABASE_MINIMUM_FLYWAY_MIGRATION_VERSION
+              value: "0.29.15.001"
+            - name: JOBS_DATABASE_MINIMUM_FLYWAY_MIGRATION_VERSION
+              value: "0.29.17.001"
+        
+        workload-launcher:
+          extraEnv:
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: airbyte-db-secret
+                  key: password
+            - name: DATABASE_URL
+              value: "jdbc:postgresql://postgres-service:5432/airbyte"
+            - name: DATABASE_HOST
+              value: "postgres-service"
+            - name: DATABASE_PORT
+              value: "5432"
+            - name: DATABASE_DB
+              value: "airbyte"
+            - name: DATABASE_USER
+              value: "airbyte"
+        
+        airbyte-bootloader:
+          extraEnv:
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: airbyte-db-secret
+                  key: password
+            - name: DATABASE_URL
+              value: "jdbc:postgresql://postgres-service:5432/airbyte"
+        EOF
+        
+        # Update the main values file with domain
+        export DOMAIN_PLACEHOLDER="$DOMAIN"
+        envsubst < helm/airbyte-values.yaml > helm/airbyte-values-updated.yaml
+        
+        # Install with both values files
         helm upgrade --install airbyte airbyte/airbyte \
           --namespace airbyte \
-          --values helm/airbyte-values.yaml \
+          --values helm/airbyte-values-updated.yaml \
+          --values helm/values-override.yaml \
           --timeout 10m \
           --wait
 
