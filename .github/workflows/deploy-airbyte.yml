@@ -148,6 +148,11 @@ jobs:
         service_account_key: ${{ secrets.GCP_SA_KEY }}
         project_id: thg-dev-icehouse
 
+    - name: Install gke-gcloud-auth-plugin
+      run: |-
+        gcloud components install gke-gcloud-auth-plugin
+        export USE_GKE_GCLOUD_AUTH_PLUGIN=True
+
     - name: Get GKE credentials
       run: |-
         gcloud container clusters get-credentials $GKE_CLUSTER --zone $GKE_ZONE
