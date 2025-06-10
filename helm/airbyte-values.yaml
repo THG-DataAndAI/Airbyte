@@ -19,7 +19,7 @@ webapp:
       networking.gke.io/managed-certificates: "airbyte-ssl-cert"
       kubernetes.io/ingress.allow-http: "false"
     hosts:
-      - host: DOMAIN_PLACEHOLDER
+      - host: ${DOMAIN_PLACEHOLDER}
         paths:
           - path: /
             pathType: Prefix
