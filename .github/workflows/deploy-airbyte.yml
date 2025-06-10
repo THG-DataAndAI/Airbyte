@@ -150,7 +150,7 @@ jobs:
 
     - name: Install gke-gcloud-auth-plugin
       run: |-
-        gcloud components install gke-gcloud-auth-plugin
+        gcloud components install gke-gcloud-auth-plugin --quiet
         export USE_GKE_GCLOUD_AUTH_PLUGIN=True
 
     - name: Get GKE credentials
