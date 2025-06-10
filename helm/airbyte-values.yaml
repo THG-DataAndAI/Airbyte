@@ -7,6 +7,28 @@ global:
     port: "5432"
     database: "airbyte"
     user: "airbyte"
+  
+  # Add missing environment configurations
+  env_vars:
+    AIRBYTE_VERSION: "0.50.33"
+    API_URL: "/api/v1/"
+    CONNECTOR_BUILDER_API_URL: "/connector-builder-api"
+    INTERNAL_API_HOST: "airbyte-airbyte-server-svc:8001"
+    WEBAPP_URL: "https://${DOMAIN_PLACEHOLDER}"
+    WORKER_ENVIRONMENT: "kubernetes"
+    WORKSPACE_ROOT: "/tmp/workspace"
+    WORKSPACE_DOCKER_MOUNT: "airbyte_workspace"
+    LOCAL_ROOT: "/tmp/airbyte_local"
+    CONFIG_ROOT: "/data"
+    TRACKING_STRATEGY: "segment"
+    JOB_MAIN_CONTAINER_CPU_REQUEST: "0.1"
+    JOB_MAIN_CONTAINER_CPU_LIMIT: "1.0"
+    JOB_MAIN_CONTAINER_MEMORY_REQUEST: "0.2Gi"
+    JOB_MAIN_CONTAINER_MEMORY_LIMIT: "1Gi"
+    NORMALIZATION_JOB_MAIN_CONTAINER_MEMORY_LIMIT: "1Gi"
+    NORMALIZATION_JOB_MAIN_CONTAINER_MEMORY_REQUEST: "0.2Gi"
+    NORMALIZATION_JOB_MAIN_CONTAINER_CPU_LIMIT: "1.0"
+    NORMALIZATION_JOB_MAIN_CONTAINER_CPU_REQUEST: "0.1"
 
 webapp:
   replicaCount: 1
@@ -34,6 +56,9 @@ server:
     limits:
       memory: "1Gi"
       cpu: "500m"
+  env_vars:
+    CONFIGS_DATABASE_MINIMUM_FLYWAY_MIGRATION_VERSION: "0.29.15.001"
+    JOBS_DATABASE_MINIMUM_FLYWAY_MIGRATION_VERSION: "0.29.17.001"
 
 worker:
   replicaCount: 1
@@ -44,9 +69,21 @@ worker:
     limits:
       memory: "2Gi"
       cpu: "1000m"
+  env_vars:
+    ACTIVITY_MAX_ATTEMPT: "5"
+    ACTIVITY_INITIAL_DELAY_BETWEEN_ATTEMPTS_SECONDS: "30"
+    ACTIVITY_MAX_DELAY_BETWEEN_ATTEMPTS_SECONDS: "600"
+    ACTIVITY_MAX_TIMEOUT_SECOND: "120"
 
 airbyte-bootloader:
   enabled: true
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "100m"
+    limits:
+      memory: "512Mi"
+      cpu: "250m"
 
 temporal:
   enabled: true
@@ -104,8 +141,6 @@ podSecurityContext:
   runAsUser: 1000
   fsGroup: 1000
 
-# Network policies (optional - uncomment if needed)
-# networkPolicy:
-#   enabled: true
-#   ingress:
-#     - from: []
+# Ensure consistent image tags
+images:
+  useTagOverrides: false
