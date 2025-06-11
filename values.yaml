@@ -27,6 +27,13 @@ webapp:
   service:
     type: ClusterIP
     port: 80
+  resources:
+    limits:
+      cpu: 500m
+      memory: 1Gi
+    requests:
+      cpu: 250m
+      memory: 512Mi
   ingress:
     enabled: true
     className: nginx
@@ -35,6 +42,16 @@ webapp:
       nginx.ingress.kubernetes.io/proxy-body-size: "0"
       nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
       nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+      nginx.ingress.kubernetes.io/proxy-buffering: "off"
+      # Rate limiting
+      nginx.ingress.kubernetes.io/limit-rps: "10"
+      nginx.ingress.kubernetes.io/limit-connections: "20"
+      # Security headers
+      nginx.ingress.kubernetes.io/configuration-snippet: |
+        more_set_headers "X-Frame-Options: DENY";
+        more_set_headers "X-Content-Type-Options: nosniff";
+        more_set_headers "X-XSS-Protection: 1; mode=block";
+        more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
     hosts:
       - host: airbyte.thg-reporting.com
         paths:
@@ -48,6 +65,13 @@ webapp:
 server:
   enabled: true
   replicaCount: 1
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 1Gi
   env:
     - name: TRACKING_STRATEGY
       value: "segment"
@@ -62,10 +86,24 @@ server:
           key: DATABASE_PASSWORD
     - name: CONFIG_DATABASE_URL
       value: "jdbc:postgresql://airbyte-db-postgresql:5432/airbyte"
+    - name: BASIC_AUTH_USERNAME
+      value: "airbyte"
+    - name: BASIC_AUTH_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: airbyte-auth-secrets
+          key: AIRBYTE_ADMIN_PASSWORD
 
 worker:
   enabled: true
   replicaCount: 1
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 1Gi
   env:
     - name: SYNC_JOB_MAX_ATTEMPTS
       value: "3"
@@ -74,6 +112,13 @@ worker:
 
 airbyte-bootloader:
   enabled: true
+  resources:
+    limits:
+      cpu: 500m
+      memory: 1Gi
+    requests:
+      cpu: 250m
+      memory: 512Mi
   env:
     - name: DATABASE_USER
       value: "airbyte"
@@ -88,6 +133,13 @@ airbyte-bootloader:
 temporal:
   enabled: true
   replicaCount: 1
+  resources:
+    limits:
+      cpu: 500m
+      memory: 1Gi
+    requests:
+      cpu: 250m
+      memory: 512Mi
 
 postgresql:
   enabled: false  # We'll use external PostgreSQL
@@ -106,17 +158,31 @@ minio:
   auth:
     rootUser: minio
     rootPassword: minio123
-
-# Resource limits
-resources:
-  limits:
-    cpu: 1000m
-    memory: 2Gi
-  requests:
-    cpu: 500m
-    memory: 1Gi
+  resources:
+    limits:
+      cpu: 500m
+      memory: 1Gi
+    requests:
+      cpu: 250m
+      memory: 512Mi
 
 # Pod disruption budget
 podDisruptionBudget:
   enabled: true
   minAvailable: 1
+
+# Pod Security Context
+podSecurityContext:
+  fsGroup: 1000
+  runAsUser: 1000
+  runAsNonRoot: true
+
+# Security Context for containers
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1000
+  capabilities:
+    drop:
+      - ALL
