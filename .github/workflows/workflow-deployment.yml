@@ -1,564 +1,402 @@
-name: Deploy Airbyte to GKE
+name: Deploy Airbyte on GKE
 
 on:
   workflow_dispatch:
     inputs:
-      action:
-        description: 'Deployment action'
-        required: true
-        default: 'deploy'
-        type: choice
-        options:
-          - deploy
-          - teardown
       cluster_name:
-        description: 'GKE cluster name'
-        required: false
+        description: 'GKE Cluster Name'
+        required: true
         default: 'airbyte-cluster'
+      region:
+        description: 'GCP Region'
+        required: true
+        default: 'europe-west2-a'
+      domain:
+        description: 'Domain for external access (e.g., airbyte.yourdomain.com)'
+        required: true
+      destroy:
+        description: 'Destroy infrastructure'
+        required: false
+        default: 'false'
 
 env:
   PROJECT_ID: thg-dev-icehouse
-  REGION: europe-west2
-  ZONE: europe-west2-a
-  CLUSTER_NAME: ${{ github.event.inputs.cluster_name }}
-  NAMESPACE: airbyte
+  GKE_CLUSTER: ${{ github.event.inputs.cluster_name }}
+  GKE_ZONE: ${{ github.event.inputs.region }}
+  DOMAIN: ${{ github.event.inputs.domain }}
 
 jobs:
-  deploy:
+  debug-inputs:
+    name: Debug Workflow Inputs
     runs-on: self-hosted
-    environment: dev
+    steps:
+    - name: Display inputs
+      run: |
+        echo "=== Workflow Inputs ==="
+        echo "Cluster Name: ${{ github.event.inputs.cluster_name }}"
+        echo "Region: ${{ github.event.inputs.region }}"
+        echo "Domain: ${{ github.event.inputs.domain }}"
+        echo "Destroy: ${{ github.event.inputs.destroy }}"
+        echo "Destroy != 'true': ${{ github.event.inputs.destroy != 'true' }}"
+        echo "========================"
+
+  setup-infrastructure:
+    name: Setup GKE Infrastructure
+    runs-on: self-hosted
+    if: ${{ !contains(github.event.inputs.destroy, 'true') }}
     
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
+    - name: Checkout
+      uses: actions/checkout@v4
 
-    - name: Setup Google Cloud SDK
+    - name: Setup Google Cloud CLI
       uses: google-github-actions/setup-gcloud@v1
       with:
-        service_account_key: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
-        project_id: ${{ env.PROJECT_ID }}
+        service_account_key: ${{ secrets.GCP_SA_KEY }}
+        project_id: thg-dev-icehouse
 
-    - name: Configure Docker for GCR
-      run: |
-        gcloud auth configure-docker
+    - name: Configure Docker to use gcloud as credential helper
+      run: |-
+        gcloud --quiet auth configure-docker
+
+    - name: Enable required APIs
+      run: |-
+        gcloud services enable container.googleapis.com
+        gcloud services enable compute.googleapis.com
+        gcloud services enable dns.googleapis.com
+        gcloud services enable certificatemanager.googleapis.com
+
+    - name: Create GKE cluster
+      run: |-
+        gcloud container clusters create $GKE_CLUSTER \
+          --zone $GKE_ZONE \
+          --num-nodes 3 \
+          --machine-type e2-standard-4 \
+          --disk-size 50GB \
+          --disk-type pd-ssd \
+          --enable-autorepair \
+          --enable-autoupgrade \
+          --enable-autoscaling \
+          --min-nodes 1 \
+          --max-nodes 5 \
+          --enable-network-policy \
+          --addons HorizontalPodAutoscaling,HttpLoadBalancing,GcePersistentDiskCsiDriver
+
+    - name: Get GKE credentials
+      run: |-
+        gcloud container clusters get-credentials $GKE_CLUSTER --zone $GKE_ZONE
+
+    - name: Create static IP address
+      run: |-
+        gcloud compute addresses create airbyte-ip --global || true
+
+    - name: Get static IP
+      id: get_ip
+      run: |-
+        IP=$(gcloud compute addresses describe airbyte-ip --global --format="value(address)")
+        echo "static_ip=$IP" >> $GITHUB_OUTPUT
+        echo "Static IP: $IP"
+
+    outputs:
+      static_ip: ${{ steps.get_ip.outputs.static_ip }}
+
+  setup-dns:
+    name: Setup DNS
+    runs-on: self-hosted
+    needs: setup-infrastructure
+    if: ${{ !contains(github.event.inputs.destroy, 'true') }}
+    
+    steps:
+    - name: Setup Google Cloud CLI
+      uses: google-github-actions/setup-gcloud@v1
+      with:
+        service_account_key: ${{ secrets.GCP_SA_KEY }}
+        project_id: thg-dev-icehouse
+
+    - name: Create DNS zone (if needed)
+      run: |-
+        ZONE_NAME=$(echo $DOMAIN | sed 's/\./-/g')
+        ROOT_DOMAIN=$(echo $DOMAIN | sed 's/^[^.]*\.//')
+        gcloud dns managed-zones create $ZONE_NAME \
+          --description="Zone for $ROOT_DOMAIN" \
+          --dns-name=$ROOT_DOMAIN. || true
+
+    - name: Create DNS A record
+      run: |-
+        ZONE_NAME=$(echo $DOMAIN | sed 's/^[^.]*\.//' | sed 's/\./-/g')
+        gcloud dns record-sets transaction start --zone=$ZONE_NAME || true
+        gcloud dns record-sets transaction add ${{ needs.setup-infrastructure.outputs.static_ip }} \
+          --name=$DOMAIN. \
+          --ttl=300 \
+          --type=A \
+          --zone=$ZONE_NAME || true
+        gcloud dns record-sets transaction execute --zone=$ZONE_NAME || true
+
+  deploy-postgres:
+    name: Deploy PostgreSQL
+    runs-on: self-hosted
+    needs: setup-infrastructure
+    if: ${{ !contains(github.event.inputs.destroy, 'true') }}
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup Google Cloud CLI
+      uses: google-github-actions/setup-gcloud@v1
+      with:
+        service_account_key: ${{ secrets.GCP_SA_KEY }}
+        project_id: thg-dev-icehouse
 
     - name: Install gke-gcloud-auth-plugin
-      if: github.event.inputs.action == 'deploy'
-      run: |
+      run: |-
         gcloud components install gke-gcloud-auth-plugin --quiet
+        export USE_GKE_GCLOUD_AUTH_PLUGIN=True
 
-    - name: Create GKE Cluster
-      if: github.event.inputs.action == 'deploy'
-      run: |
-        # Check if cluster exists
-        if ! gcloud container clusters describe ${{ env.CLUSTER_NAME }} --region=${{ env.REGION }} 2>/dev/null; then
-          echo "Creating GKE cluster..."
-          gcloud container clusters create ${{ env.CLUSTER_NAME }} \
-            --region=${{ env.REGION }} \
-            --num-nodes=3 \
-            --node-locations=${{ env.ZONE }} \
-            --machine-type=n2-standard-4 \
-            --disk-type=pd-standard \
-            --disk-size=100 \
-            --enable-autoscaling \
-            --min-nodes=3 \
-            --max-nodes=10 \
-            --enable-autorepair \
-            --enable-autoupgrade \
-            --addons=HorizontalPodAutoscaling,HttpLoadBalancing \
-            --workload-pool=${{ env.PROJECT_ID }}.svc.id.goog \
-            --enable-shielded-nodes
-        else
-          echo "Cluster already exists, skipping creation..."
-        fi
-
-    - name: Configure kubectl
-      if: github.event.inputs.action == 'deploy'
-      run: |
-        gcloud container clusters get-credentials ${{ env.CLUSTER_NAME }} --region=${{ env.REGION }}
-
-    - name: Install Helm
-      if: github.event.inputs.action == 'deploy'
-      uses: azure/setup-helm@v3
-      with:
-        version: 'v3.12.0'
-
-    - name: Add Helm repositories
-      if: github.event.inputs.action == 'deploy'
-      run: |
-        helm repo add bitnami https://charts.bitnami.com/bitnami
-        helm repo add airbyte https://airbytehq.github.io/helm-charts
-        helm repo add jetstack https://charts.jetstack.io
-        helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
-        helm repo update
+    - name: Get GKE credentials
+      run: |-
+        gcloud container clusters get-credentials $GKE_CLUSTER --zone $GKE_ZONE
 
     - name: Create namespace
-      if: github.event.inputs.action == 'deploy'
-      run: |
-        kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+      run: |-
+        kubectl create namespace airbyte || true
 
-    - name: Create service account
-      if: github.event.inputs.action == 'deploy'
-      run: |
-        kubectl create serviceaccount airbyte -n ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+    - name: Create PostgreSQL secret
+      run: |-
+        kubectl create secret generic postgres-secret \
+          --from-literal=postgres-password=$(openssl rand -base64 32) \
+          --namespace=airbyte || true
+
+    - name: Deploy PostgreSQL
+      run: |-
+        cat <<EOF | kubectl apply -f -
+        apiVersion: v1
+        kind: PersistentVolumeClaim
+        metadata:
+          name: postgres-pvc
+          namespace: airbyte
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 20Gi
+          storageClassName: standard-rwo
+        ---
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: postgres
+          namespace: airbyte
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              app: postgres
+          template:
+            metadata:
+              labels:
+                app: postgres
+            spec:
+              containers:
+              - name: postgres
+                image: postgres:13
+                ports:
+                - containerPort: 5432
+                env:
+                - name: POSTGRES_DB
+                  value: airbyte
+                - name: POSTGRES_USER
+                  value: airbyte
+                - name: POSTGRES_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: postgres-secret
+                      key: postgres-password
+                - name: PGDATA
+                  value: /var/lib/postgresql/data/pgdata
+                volumeMounts:
+                - name: postgres-storage
+                  mountPath: /var/lib/postgresql/data
+                resources:
+                  requests:
+                    memory: "512Mi"
+                    cpu: "250m"
+                  limits:
+                    memory: "1Gi"
+                    cpu: "500m"
+              volumes:
+              - name: postgres-storage
+                persistentVolumeClaim:
+                  claimName: postgres-pvc
+        ---
+        apiVersion: v1
+        kind: Service
+        metadata:
+          name: postgres-service
+          namespace: airbyte
+        spec:
+          selector:
+            app: postgres
+          ports:
+          - port: 5432
+            targetPort: 5432
+          type: ClusterIP
+        EOF
+
+  deploy-airbyte:
+    name: Deploy Airbyte
+    runs-on: self-hosted
+    needs: [setup-infrastructure, deploy-postgres]
+    if: ${{ !contains(github.event.inputs.destroy, 'true') }}
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup Google Cloud CLI
+      uses: google-github-actions/setup-gcloud@v1
+      with:
+        service_account_key: ${{ secrets.GCP_SA_KEY }}
+        project_id: thg-dev-icehouse
+
+    - name: Get GKE credentials
+      run: |-
+        gcloud container clusters get-credentials $GKE_CLUSTER --zone $GKE_ZONE
 
     - name: Create RBAC permissions for Airbyte
-      if: github.event.inputs.action == 'deploy'
-      run: |
-        # Create Role with necessary permissions
+      run: |-
         cat <<EOF | kubectl apply -f -
         apiVersion: rbac.authorization.k8s.io/v1
         kind: Role
         metadata:
-          name: airbyte-role
-          namespace: ${{ env.NAMESPACE }}
+          namespace: airbyte
+          name: airbyte-admin-role
         rules:
         - apiGroups: [""]
-          resources: ["secrets"]
-          verbs: ["get", "list", "create", "update", "patch", "delete"]
+          resources: ["pods", "pods/log", "pods/exec"]
+          verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
         - apiGroups: [""]
-          resources: ["configmaps"]
-          verbs: ["get", "list", "create", "update", "patch", "delete"]
-        - apiGroups: [""]
-          resources: ["pods"]
-          verbs: ["get", "list", "watch"]
-        - apiGroups: [""]
-          resources: ["pods/logs"]
-          verbs: ["get", "list"]
-        EOF
-        
-        # Create RoleBinding
-        cat <<EOF | kubectl apply -f -
+          resources: ["configmaps", "secrets", "persistentvolumeclaims"]
+          verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+        - apiGroups: ["apps"]
+          resources: ["deployments", "replicasets"]
+          verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+        - apiGroups: ["batch"]
+          resources: ["jobs"]
+          verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+        - apiGroups: ["extensions", "networking.k8s.io"]
+          resources: ["ingresses"]
+          verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+        ---
         apiVersion: rbac.authorization.k8s.io/v1
         kind: RoleBinding
         metadata:
-          name: airbyte-rolebinding
-          namespace: ${{ env.NAMESPACE }}
-        roleRef:
-          apiGroup: rbac.authorization.k8s.io
-          kind: Role
-          name: airbyte-role
+          name: airbyte-admin-rolebinding
+          namespace: airbyte
         subjects:
         - kind: ServiceAccount
           name: airbyte
-          namespace: ${{ env.NAMESPACE }}
+          namespace: airbyte
+        roleRef:
+          kind: Role
+          name: airbyte-admin-role
+          apiGroup: rbac.authorization.k8s.io
         EOF
 
-    - name: Install cert-manager
-      if: github.event.inputs.action == 'deploy'
-      run: |
-        kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.0/cert-manager.crds.yaml
-        
-        helm upgrade --install cert-manager jetstack/cert-manager \
-          --namespace cert-manager \
-          --create-namespace \
-          --version v1.13.0 \
-          --wait
+    - name: Add Airbyte Helm repository
+      run: |-
+        helm repo add airbyte https://airbytehq.github.io/helm-charts
+        helm repo update
 
-    - name: Create ClusterIssuer for Let's Encrypt
-      if: github.event.inputs.action == 'deploy'
-      run: |
-        cat <<EOF | kubectl apply -f -
-        apiVersion: cert-manager.io/v1
-        kind: ClusterIssuer
-        metadata:
-          name: letsencrypt-prod
-        spec:
-          acme:
-            server: https://acme-v02.api.letsencrypt.org/directory
-            email: ${{ secrets.LETSENCRYPT_EMAIL }}
-            privateKeySecretRef:
-              name: letsencrypt-prod
-            solvers:
-            - http01:
-                ingress:
-                  class: nginx
-        EOF
+    - name: Get PostgreSQL password
+      id: get_pg_password
+      run: |-
+        PG_PASSWORD=$(kubectl get secret postgres-secret -n airbyte -o jsonpath="{.data.postgres-password}" | base64 --decode)
+        echo "::add-mask::$PG_PASSWORD"
+        echo "pg_password=$PG_PASSWORD" >> $GITHUB_OUTPUT
 
-    - name: Install NGINX Ingress Controller
-      if: github.event.inputs.action == 'deploy'
-      run: |
-        helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
-          --namespace ingress-nginx \
-          --create-namespace \
-          --set controller.service.type=LoadBalancer \
-          --set controller.service.annotations."cloud\.google\.com/load-balancer-type"="External" \
-          --wait
+    - name: Update Airbyte values with domain
+      run: |-
+        # Get the PostgreSQL password
+        DB_PASSWORD=$(kubectl get secret postgres-secret -n airbyte -o jsonpath="{.data.postgres-password}" | base64 --decode)
+        export DOMAIN_PLACEHOLDER="$DOMAIN"
+        export DB_PASSWORD="$DB_PASSWORD"
+        envsubst < helm/airbyte-values.yaml > helm/airbyte-values-updated.yaml
+        mv helm/airbyte-values-updated.yaml helm/airbyte-values.yaml
 
     - name: Create database secret
-      if: github.event.inputs.action == 'deploy'
-      run: |
-        kubectl create secret generic airbyte-db-secrets \
-          --namespace=${{ env.NAMESPACE }} \
-          --from-literal=DATABASE_PASSWORD=${{ secrets.AIRBYTE_DB_PASSWORD }} \
-          --dry-run=client -o yaml | kubectl apply -f -
+      run: |-
+        kubectl create secret generic airbyte-db-secret \
+          --from-literal=password="${{ steps.get_pg_password.outputs.pg_password }}" \
+          --namespace=airbyte || true
 
-    - name: Validate secrets
-      if: github.event.inputs.action == 'deploy'
-      run: |
-        # Check if required secrets are set
-        if [ -z "${{ secrets.AIRBYTE_DB_PASSWORD }}" ]; then
-          echo "ERROR: AIRBYTE_DB_PASSWORD secret is not set!"
-          echo "Please add this secret in your repository settings:"
-          echo "Settings → Secrets and variables → Actions → New repository secret"
-          echo ""
-          echo "You can generate a strong password with:"
-          echo "openssl rand -base64 32"
-          exit 1
-        fi
-        
-        if [ -z "${{ secrets.LETSENCRYPT_EMAIL }}" ]; then
-          echo "ERROR: LETSENCRYPT_EMAIL secret is not set!"
-          echo "Please add this secret in your repository settings."
-          exit 1
-        fi
-        
-        echo "All required secrets are configured ✓"
+    - name: Create SSL certificate
+      run: |-
+        cat <<EOF | kubectl apply -f -
+        apiVersion: networking.gke.io/v1
+        kind: ManagedCertificate
+        metadata:
+          name: airbyte-ssl-cert
+          namespace: airbyte
+        spec:
+          domains:
+            - $DOMAIN
+        EOF
 
-    - name: Deploy PostgreSQL
-      if: github.event.inputs.action == 'deploy'
-      run: |
-        helm upgrade --install airbyte-db bitnami/postgresql \
-          --namespace=${{ env.NAMESPACE }} \
-          --set auth.username=airbyte \
-          --set auth.password=${{ secrets.AIRBYTE_DB_PASSWORD }} \
-          --set auth.database=airbyte \
-          --set persistence.enabled=true \
-          --set persistence.size=50Gi \
-          --set resources.requests.memory=256Mi \
-          --set resources.requests.cpu=250m \
-          --set resources.limits.memory=1Gi \
-          --set resources.limits.cpu=1000m \
-          --wait
-
-    - name: Wait for PostgreSQL to be ready
-      if: github.event.inputs.action == 'deploy'
-      run: |
-        kubectl wait --for=condition=ready pod \
-          -l app.kubernetes.io/name=postgresql \
-          -n ${{ env.NAMESPACE }} \
-          --timeout=300s
-
-    - name: Create Airbyte ConfigMaps
-      if: github.event.inputs.action == 'deploy'
-      run: |
-        # Create the base airbyte-env configmap
-        kubectl create configmap airbyte-env \
-          --namespace=${{ env.NAMESPACE }} \
-          --from-literal=AIRBYTE_VERSION=0.50.0 \
-          --from-literal=RUN_DATABASE_MIGRATION_ON_STARTUP=true \
-          --dry-run=client -o yaml | kubectl apply -f -
-        
-        # Create the airbyte-airbyte-env configmap with additional settings
-        kubectl create configmap airbyte-airbyte-env \
-          --namespace=${{ env.NAMESPACE }} \
-          --from-literal=AIRBYTE_VERSION=0.50.0 \
-          --from-literal=AIRBYTE_EDITION=community \
-          --from-literal=DATABASE_HOST=airbyte-db-postgresql \
-          --from-literal=DATABASE_PORT=5432 \
-          --from-literal=DATABASE_DB=airbyte \
-          --from-literal=DATABASE_URL=jdbc:postgresql://airbyte-db-postgresql:5432/airbyte \
-          --from-literal=TRACKING_STRATEGY=segment \
-          --from-literal=MICROMETER_METRICS_ENABLED=false \
-          --from-literal=MICROMETER_METRICS_STATSD_ENABLED=false \
-          --from-literal=STATSD_HOST=localhost \
-          --from-literal=STATSD_PORT=8125 \
-          --dry-run=client -o yaml | kubectl apply -f -
-
-    - name: Deploy Airbyte
-      if: github.event.inputs.action == 'deploy'
-      run: |
-        # Set database password as environment variable to avoid issues with special characters
-        export DB_PASSWORD="${{ secrets.AIRBYTE_DB_PASSWORD }}"
-        
-        # Deploy Airbyte with proper database configuration
+    - name: Install Airbyte
+      run: |-
         helm upgrade --install airbyte airbyte/airbyte \
-          --namespace=${{ env.NAMESPACE }} \
-          --values values.yaml \
-          --set global.database.user=airbyte \
-          --set global.database.password="$DB_PASSWORD" \
-          --set global.database.existingSecret="" \
-          --set postgresql.enabled=false \
-          --set externalDatabase.host=airbyte-db-postgresql \
-          --set externalDatabase.user=airbyte \
-          --set externalDatabase.password="$DB_PASSWORD" \
-          --set externalDatabase.existingSecret="" \
-          --set externalDatabase.database=airbyte \
-          --set externalDatabase.port=5432 \
-          --timeout 15m \
+          --namespace airbyte \
+          --values helm/airbyte-values.yaml \
+          --timeout 10m \
           --wait
 
-    - name: Get Ingress IP
-      if: github.event.inputs.action == 'deploy'
-      run: |
-        echo "Checking for Ingress resources..."
-        kubectl get ingress -n ${{ env.NAMESPACE }}
-        
-        echo "Checking for Services..."
-        kubectl get svc -n ${{ env.NAMESPACE }}
-        
-        echo "Waiting for LoadBalancer IP..."
-        for i in {1..30}; do
-          # First try to get IP from Ingress
-          INGRESS_IP=$(kubectl get ingress -n ${{ env.NAMESPACE }} -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
-          
-          # If no Ingress IP, try to get IP from NGINX LoadBalancer service
-          if [ -z "$INGRESS_IP" ]; then
-            INGRESS_IP=$(kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
-          fi
-          
-          if [ ! -z "$INGRESS_IP" ]; then
-            echo "Found IP: $INGRESS_IP"
-            echo "INGRESS_IP=$INGRESS_IP" >> $GITHUB_ENV
-            break
-          fi
-          
-          echo "Waiting for LoadBalancer IP... ($i/30)"
-          sleep 10
-        done
-        
-        if [ -z "$INGRESS_IP" ]; then
-          echo "Failed to get LoadBalancer IP"
-          echo "Debugging information:"
-          kubectl describe svc -n ingress-nginx ingress-nginx-controller
-          exit 1
-        fi
+    - name: Wait for certificate provisioning
+      run: |-
+        echo "Waiting for SSL certificate to be provisioned..."
+        timeout 600 bash -c 'until kubectl get managedcertificate airbyte-ssl-cert -n airbyte -o jsonpath="{.status.certificateStatus}" | grep -q "Active"; do echo "Certificate status: $(kubectl get managedcertificate airbyte-ssl-cert -n airbyte -o jsonpath="{.status.certificateStatus}")"; sleep 30; done' || true
 
-    - name: Configure DNS Record
-      if: github.event.inputs.action == 'deploy'
-      run: |
-        echo "Configuring DNS record for airbyte.thg-reporting.com..."
-        
-        # Check which DNS provider is being used
-        # Option 1: Using Google Cloud DNS
-        if [[ "${{ secrets.DNS_PROVIDER }}" == "gcloud" ]]; then
-          # First, list available zones
-          echo "Checking available DNS zones..."
-          gcloud dns managed-zones list
-          
-          # Get the managed zone name
-          ZONE_NAME="${{ secrets.DNS_ZONE_NAME }}"
-          
-          # Check if zone exists, if not create it
-          if ! gcloud dns managed-zones describe $ZONE_NAME 2>/dev/null; then
-            echo "DNS Zone $ZONE_NAME does not exist. Creating it..."
-            gcloud dns managed-zones create $ZONE_NAME \
-              --dns-name=thg-reporting.com. \
-              --description="THG Development Zone" \
-              --visibility=public
-          fi
-          
-          # Check if A record exists
-          EXISTING_IP=$(gcloud dns record-sets list \
-            --zone=$ZONE_NAME \
-            --name=airbyte.thg-reporting.com. \
-            --type=A \
-            --format="value(rrdatas[0])" 2>/dev/null || echo "")
-          
-          if [ ! -z "$EXISTING_IP" ]; then
-            echo "Updating existing DNS record from $EXISTING_IP to ${{ env.INGRESS_IP }}..."
-            # First delete the old record
-            gcloud dns record-sets delete airbyte.thg-reporting.com. \
-              --zone=$ZONE_NAME \
-              --type=A || true
-            # Then create the new one
-            gcloud dns record-sets create airbyte.thg-reporting.com. \
-              --zone=$ZONE_NAME \
-              --type=A \
-              --ttl=300 \
-              --rrdatas=${{ env.INGRESS_IP }}
-          else
-            echo "Creating new DNS record..."
-            gcloud dns record-sets create airbyte.thg-reporting.com. \
-              --zone=$ZONE_NAME \
-              --type=A \
-              --ttl=300 \
-              --rrdatas=${{ env.INGRESS_IP }}
-          fi
-        
-        # Option 2: Using Cloudflare
-        elif [[ "${{ secrets.DNS_PROVIDER }}" == "cloudflare" ]]; then
-          # Install jq if not available
-          which jq > /dev/null || sudo apt-get update && sudo apt-get install -y jq
-          
-          ZONE_ID="${{ secrets.CLOUDFLARE_ZONE_ID }}"
-          API_TOKEN="${{ secrets.CLOUDFLARE_API_TOKEN }}"
-          
-          # Check if record exists
-          RECORD_ID=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=airbyte.thg-reporting.com" \
-            -H "Authorization: Bearer $API_TOKEN" \
-            -H "Content-Type: application/json" | jq -r '.result[0].id // empty')
-          
-          if [ ! -z "$RECORD_ID" ]; then
-            echo "Updating existing Cloudflare DNS record..."
-            curl -X PUT "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records/$RECORD_ID" \
-              -H "Authorization: Bearer $API_TOKEN" \
-              -H "Content-Type: application/json" \
-              --data '{
-                "type": "A",
-                "name": "airbyte",
-                "content": "'${{ env.INGRESS_IP }}'",
-                "ttl": 300,
-                "proxied": false
-              }'
-          else
-            echo "Creating new Cloudflare DNS record..."
-            curl -X POST "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records" \
-              -H "Authorization: Bearer $API_TOKEN" \
-              -H "Content-Type: application/json" \
-              --data '{
-                "type": "A",
-                "name": "airbyte",
-                "content": "'${{ env.INGRESS_IP }}'",
-                "ttl": 300,
-                "proxied": false
-              }'
-          fi
-        
-        # Option 3: Using Route53
-        elif [[ "${{ secrets.DNS_PROVIDER }}" == "route53" ]]; then
-          HOSTED_ZONE_ID="${{ secrets.ROUTE53_HOSTED_ZONE_ID }}"
-          
-          # Create change batch
-          cat > /tmp/change-batch.json <<EOF
-        {
-          "Changes": [{
-            "Action": "UPSERT",
-            "ResourceRecordSet": {
-              "Name": "airbyte.thg-reporting.com",
-              "Type": "A",
-              "TTL": 300,
-              "ResourceRecords": [{
-                "Value": "${{ env.INGRESS_IP }}"
-              }]
-            }
-          }]
-        }
-        EOF
-          
-          # Apply the change
-          aws route53 change-resource-record-sets \
-            --hosted-zone-id $HOSTED_ZONE_ID \
-            --change-batch file:///tmp/change-batch.json
-        
-        else
-          echo "WARNING: DNS_PROVIDER not configured or unsupported."
-          echo "Please manually configure DNS A record:"
-          echo "  Host: airbyte.thg-reporting.com"
-          echo "  Type: A"
-          echo "  Value: ${{ env.INGRESS_IP }}"
-        fi
-        
-        echo "DNS configuration completed. It may take a few minutes to propagate."
-
-    - name: Display deployment information
-      if: github.event.inputs.action == 'deploy'
-      run: |
-        echo "=========================================="
-        echo "Airbyte deployment completed successfully!"
-        echo "=========================================="
-        echo "Cluster: ${{ env.CLUSTER_NAME }}"
-        echo "Namespace: ${{ env.NAMESPACE }}"
-        echo "URL: https://airbyte.thg-reporting.com"
-        echo "Ingress IP: ${{ env.INGRESS_IP }}"
+    - name: Get service information
+      run: |-
+        echo "=== Airbyte Deployment Status ==="
+        kubectl get pods -n airbyte
         echo ""
-        echo "DNS has been configured automatically."
-        echo "Please wait 2-5 minutes for DNS propagation."
+        echo "=== Ingress Information ==="
+        kubectl get ingress -n airbyte
         echo ""
-        echo "Initial credentials:"
-        echo "Username: airbyte"
-        echo "Password: password (change immediately after first login)"
-        echo "=========================================="
+        echo "=== Certificate Status ==="
+        kubectl get managedcertificate -n airbyte
+        echo ""
+        echo "=== Access Information ==="
+        echo "Airbyte will be available at: https://$DOMAIN"
+        echo "Static IP: ${{ needs.setup-infrastructure.outputs.static_ip }}"
+        echo ""
+        echo "Note: SSL certificate provisioning may take 10-60 minutes."
+        echo "You can check the status with:"
+        echo "kubectl get managedcertificate airbyte-ssl-cert -n airbyte"
 
-    - name: Wait for DNS propagation
-      if: github.event.inputs.action == 'deploy'
-      run: |
-        echo "Waiting for DNS to propagate..."
-        for i in {1..20}; do
-          if nslookup airbyte.thg-reporting.com 8.8.8.8 | grep -q "${{ env.INGRESS_IP }}"; then
-            echo "DNS has propagated successfully!"
-            break
-          fi
-          echo "Waiting for DNS propagation... ($i/20)"
-          sleep 15
-        done
+  cleanup:
+    name: Cleanup Infrastructure
+    runs-on: self-hosted
+    if: ${{ contains(github.event.inputs.destroy, 'true') }}
+    
+    steps:
+    - name: Setup Google Cloud CLI
+      uses: google-github-actions/setup-gcloud@v1
+      with:
+        service_account_key: ${{ secrets.GCP_SA_KEY }}
+        project_id: ${{ secrets.GCP_PROJECT_ID }}
 
-    - name: Teardown deployment
-      if: github.event.inputs.action == 'teardown'
-      run: |
-        # Configure kubectl
-        gcloud container clusters get-credentials ${{ env.CLUSTER_NAME }} --region=${{ env.REGION }} || true
-        
-        # Delete DNS record first
-        echo "Removing DNS record..."
-        if [[ "${{ secrets.DNS_PROVIDER }}" == "gcloud" ]]; then
-          ZONE_NAME="${{ secrets.DNS_ZONE_NAME }}"
-          gcloud dns record-sets delete airbyte.thg-reporting.com. \
-            --zone=$ZONE_NAME \
-            --type=A || true
-        elif [[ "${{ secrets.DNS_PROVIDER }}" == "cloudflare" ]]; then
-          ZONE_ID="${{ secrets.CLOUDFLARE_ZONE_ID }}"
-          API_TOKEN="${{ secrets.CLOUDFLARE_API_TOKEN }}"
-          RECORD_ID=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=airbyte.thg-reporting.com" \
-            -H "Authorization: Bearer $API_TOKEN" \
-            -H "Content-Type: application/json" | jq -r '.result[0].id // empty')
-          if [ ! -z "$RECORD_ID" ]; then
-            curl -X DELETE "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records/$RECORD_ID" \
-              -H "Authorization: Bearer $API_TOKEN"
-          fi
-        elif [[ "${{ secrets.DNS_PROVIDER }}" == "route53" ]]; then
-          HOSTED_ZONE_ID="${{ secrets.ROUTE53_HOSTED_ZONE_ID }}"
-          # Get current IP to delete the record
-          CURRENT_IP=$(aws route53 list-resource-record-sets \
-            --hosted-zone-id $HOSTED_ZONE_ID \
-            --query "ResourceRecordSets[?Name=='airbyte.thg-reporting.com.'].ResourceRecords[0].Value" \
-            --output text || echo "")
-          if [ ! -z "$CURRENT_IP" ]; then
-            cat > /tmp/delete-batch.json <<EOF
-        {
-          "Changes": [{
-            "Action": "DELETE",
-            "ResourceRecordSet": {
-              "Name": "airbyte.thg-reporting.com",
-              "Type": "A",
-              "TTL": 300,
-              "ResourceRecords": [{
-                "Value": "$CURRENT_IP"
-              }]
-            }
-          }]
-        }
-        EOF
-            aws route53 change-resource-record-sets \
-              --hosted-zone-id $HOSTED_ZONE_ID \
-              --change-batch file:///tmp/delete-batch.json || true
-          fi
-        fi
-        
-        # Delete Airbyte
-        helm uninstall airbyte -n ${{ env.NAMESPACE }} || true
-        
-        # Delete PostgreSQL
-        helm uninstall airbyte-db -n ${{ env.NAMESPACE }} || true
-        
-        # Delete PVCs
-        kubectl delete pvc --all -n ${{ env.NAMESPACE }} || true
-        
-        # Delete namespace
-        kubectl delete namespace ${{ env.NAMESPACE }} || true
-        
-        # Delete NGINX Ingress
-        helm uninstall ingress-nginx -n ingress-nginx || true
-        kubectl delete namespace ingress-nginx || true
-        
-        # Delete cert-manager
-        helm uninstall cert-manager -n cert-manager || true
-        kubectl delete namespace cert-manager || true
-        
-        # Delete GKE cluster
-        echo "Deleting GKE cluster..."
-        gcloud container clusters delete ${{ env.CLUSTER_NAME }} \
-          --region=${{ env.REGION }} \
-          --quiet || true
-        
-        echo "Teardown completed!"
+    - name: Delete GKE cluster
+      run: |-
+        gcloud container clusters delete $GKE_CLUSTER --zone $GKE_ZONE --quiet || true
+
+    - name: Delete static IP
+      run: |-
+        gcloud compute addresses delete airbyte-ip --global --quiet || true
+
+    - name: Delete DNS records (manual step required)
+      run: |-
+        echo "Please manually remove DNS records for $DOMAIN if no longer needed"
+        echo "Run: gcloud dns record-sets list --zone=<your-zone-name>"
