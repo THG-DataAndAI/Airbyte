@@ -36,14 +36,14 @@ webapp:
       nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
       nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
     hosts:
-      - host: airbyte.thg.dev
+      - host: airbyte.thg-reporting.com
         paths:
           - path: /
             pathType: Prefix
     tls:
       - secretName: airbyte-tls
         hosts:
-          - airbyte.thg.dev
+          - airbyte.thg-reporting.com
 
 server:
   enabled: true
