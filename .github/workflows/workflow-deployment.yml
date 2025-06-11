@@ -42,6 +42,11 @@ jobs:
       run: |
         gcloud auth configure-docker
 
+    - name: Install gke-gcloud-auth-plugin
+      if: github.event.inputs.action == 'deploy'
+      run: |
+        gcloud components install gke-gcloud-auth-plugin --quiet
+
     - name: Create GKE Cluster
       if: github.event.inputs.action == 'deploy'
       run: |
