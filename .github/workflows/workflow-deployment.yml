@@ -327,8 +327,21 @@ jobs:
         # Check which DNS provider is being used
         # Option 1: Using Google Cloud DNS
         if [[ "${{ secrets.DNS_PROVIDER }}" == "gcloud" ]]; then
+          # First, list available zones
+          echo "Checking available DNS zones..."
+          gcloud dns managed-zones list
+          
           # Get the managed zone name
           ZONE_NAME="${{ secrets.DNS_ZONE_NAME }}"
+          
+          # Check if zone exists, if not create it
+          if ! gcloud dns managed-zones describe $ZONE_NAME 2>/dev/null; then
+            echo "DNS Zone $ZONE_NAME does not exist. Creating it..."
+            gcloud dns managed-zones create $ZONE_NAME \
+              --dns-name=thg.dev. \
+              --description="THG Development Zone" \
+              --visibility=public
+          fi
           
           # Check if A record exists
           EXISTING_IP=$(gcloud dns record-sets list \
@@ -339,7 +352,12 @@ jobs:
           
           if [ ! -z "$EXISTING_IP" ]; then
             echo "Updating existing DNS record from $EXISTING_IP to ${{ env.INGRESS_IP }}..."
-            gcloud dns record-sets update airbyte.thg.dev. \
+            # First delete the old record
+            gcloud dns record-sets delete airbyte.thg.dev. \
+              --zone=$ZONE_NAME \
+              --type=A || true
+            # Then create the new one
+            gcloud dns record-sets create airbyte.thg.dev. \
               --zone=$ZONE_NAME \
               --type=A \
               --ttl=300 \
