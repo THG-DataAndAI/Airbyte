@@ -322,7 +322,7 @@ jobs:
     - name: Configure DNS Record
       if: github.event.inputs.action == 'deploy'
       run: |
-        echo "Configuring DNS record for airbyte.thg.dev..."
+        echo "Configuring DNS record for airbyte.thg-reporting.com..."
         
         # Check which DNS provider is being used
         # Option 1: Using Google Cloud DNS
@@ -346,25 +346,25 @@ jobs:
           # Check if A record exists
           EXISTING_IP=$(gcloud dns record-sets list \
             --zone=$ZONE_NAME \
-            --name=airbyte.thg.dev. \
+            --name=airbyte.thg-reporting.com. \
             --type=A \
             --format="value(rrdatas[0])" 2>/dev/null || echo "")
           
           if [ ! -z "$EXISTING_IP" ]; then
             echo "Updating existing DNS record from $EXISTING_IP to ${{ env.INGRESS_IP }}..."
             # First delete the old record
-            gcloud dns record-sets delete airbyte.thg.dev. \
+            gcloud dns record-sets delete airbyte.thg-reporting.com. \
               --zone=$ZONE_NAME \
               --type=A || true
             # Then create the new one
-            gcloud dns record-sets create airbyte.thg.dev. \
+            gcloud dns record-sets create airbyte.thg-reporting.com. \
               --zone=$ZONE_NAME \
               --type=A \
               --ttl=300 \
               --rrdatas=${{ env.INGRESS_IP }}
           else
             echo "Creating new DNS record..."
-            gcloud dns record-sets create airbyte.thg.dev. \
+            gcloud dns record-sets create airbyte.thg-reporting.com. \
               --zone=$ZONE_NAME \
               --type=A \
               --ttl=300 \
@@ -380,7 +380,7 @@ jobs:
           API_TOKEN="${{ secrets.CLOUDFLARE_API_TOKEN }}"
           
           # Check if record exists
-          RECORD_ID=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=airbyte.thg.dev" \
+          RECORD_ID=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=airbyte.thg-reporting.com" \
             -H "Authorization: Bearer $API_TOKEN" \
             -H "Content-Type: application/json" | jq -r '.result[0].id // empty')
           
@@ -420,7 +420,7 @@ jobs:
           "Changes": [{
             "Action": "UPSERT",
             "ResourceRecordSet": {
-              "Name": "airbyte.thg.dev",
+              "Name": "airbyte.thg-reporting.com",
               "Type": "A",
               "TTL": 300,
               "ResourceRecords": [{
@@ -439,7 +439,7 @@ jobs:
         else
           echo "WARNING: DNS_PROVIDER not configured or unsupported."
           echo "Please manually configure DNS A record:"
-          echo "  Host: airbyte.thg.dev"
+          echo "  Host: airbyte.thg-reporting.com"
           echo "  Type: A"
           echo "  Value: ${{ env.INGRESS_IP }}"
         fi
@@ -454,7 +454,7 @@ jobs:
         echo "=========================================="
         echo "Cluster: ${{ env.CLUSTER_NAME }}"
         echo "Namespace: ${{ env.NAMESPACE }}"
-        echo "URL: https://airbyte.thg.dev"
+        echo "URL: https://airbyte.thg-reporting.com"
         echo "Ingress IP: ${{ env.INGRESS_IP }}"
         echo ""
         echo "DNS has been configured automatically."
@@ -470,7 +470,7 @@ jobs:
       run: |
         echo "Waiting for DNS to propagate..."
         for i in {1..20}; do
-          if nslookup airbyte.thg.dev 8.8.8.8 | grep -q "${{ env.INGRESS_IP }}"; then
+          if nslookup airbyte.thg-reporting.com 8.8.8.8 | grep -q "${{ env.INGRESS_IP }}"; then
             echo "DNS has propagated successfully!"
             break
           fi
@@ -488,13 +488,13 @@ jobs:
         echo "Removing DNS record..."
         if [[ "${{ secrets.DNS_PROVIDER }}" == "gcloud" ]]; then
           ZONE_NAME="${{ secrets.DNS_ZONE_NAME }}"
-          gcloud dns record-sets delete airbyte.thg.dev. \
+          gcloud dns record-sets delete airbyte.thg-reporting.com. \
             --zone=$ZONE_NAME \
             --type=A || true
         elif [[ "${{ secrets.DNS_PROVIDER }}" == "cloudflare" ]]; then
           ZONE_ID="${{ secrets.CLOUDFLARE_ZONE_ID }}"
           API_TOKEN="${{ secrets.CLOUDFLARE_API_TOKEN }}"
-          RECORD_ID=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=airbyte.thg.dev" \
+          RECORD_ID=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=airbyte.thg-reporting.com" \
             -H "Authorization: Bearer $API_TOKEN" \
             -H "Content-Type: application/json" | jq -r '.result[0].id // empty')
           if [ ! -z "$RECORD_ID" ]; then
@@ -506,7 +506,7 @@ jobs:
           # Get current IP to delete the record
           CURRENT_IP=$(aws route53 list-resource-record-sets \
             --hosted-zone-id $HOSTED_ZONE_ID \
-            --query "ResourceRecordSets[?Name=='airbyte.thg.dev.'].ResourceRecords[0].Value" \
+            --query "ResourceRecordSets[?Name=='airbyte.thg-reporting.com.'].ResourceRecords[0].Value" \
             --output text || echo "")
           if [ ! -z "$CURRENT_IP" ]; then
             cat > /tmp/delete-batch.json <<EOF
@@ -514,7 +514,7 @@ jobs:
           "Changes": [{
             "Action": "DELETE",
             "ResourceRecordSet": {
-              "Name": "airbyte.thg.dev",
+              "Name": "airbyte.thg-reporting.com",
               "Type": "A",
               "TTL": 300,
               "ResourceRecords": [{
