@@ -5,6 +5,10 @@ global:
   secretName: airbyte-airbyte-secrets
   auth:
     enabled: true
+    initialUser:
+      email: AIRBYTE_ADMIN_USER 
+      password: AIRBYTE_ADMIN_PASSWORD
+
   database:
     secretName: airbyte-db-secrets
     secretValue: DATABASE_PASSWORD
