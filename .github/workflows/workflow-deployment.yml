@@ -286,20 +286,36 @@ jobs:
     - name: Get Ingress IP
       if: github.event.inputs.action == 'deploy'
       run: |
-        echo "Waiting for Ingress IP..."
+        echo "Checking for Ingress resources..."
+        kubectl get ingress -n ${{ env.NAMESPACE }}
+        
+        echo "Checking for Services..."
+        kubectl get svc -n ${{ env.NAMESPACE }}
+        
+        echo "Waiting for LoadBalancer IP..."
         for i in {1..30}; do
-          INGRESS_IP=$(kubectl get ingress -n ${{ env.NAMESPACE }} airbyte-airbyte-webapp -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+          # First try to get IP from Ingress
+          INGRESS_IP=$(kubectl get ingress -n ${{ env.NAMESPACE }} -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+          
+          # If no Ingress IP, try to get IP from NGINX LoadBalancer service
+          if [ -z "$INGRESS_IP" ]; then
+            INGRESS_IP=$(kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+          fi
+          
           if [ ! -z "$INGRESS_IP" ]; then
-            echo "Ingress IP: $INGRESS_IP"
+            echo "Found IP: $INGRESS_IP"
             echo "INGRESS_IP=$INGRESS_IP" >> $GITHUB_ENV
             break
           fi
-          echo "Waiting for Ingress IP... ($i/30)"
+          
+          echo "Waiting for LoadBalancer IP... ($i/30)"
           sleep 10
         done
         
         if [ -z "$INGRESS_IP" ]; then
-          echo "Failed to get Ingress IP"
+          echo "Failed to get LoadBalancer IP"
+          echo "Debugging information:"
+          kubectl describe svc -n ingress-nginx ingress-nginx-controller
           exit 1
         fi
 
