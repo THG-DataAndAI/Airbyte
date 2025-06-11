@@ -17,6 +17,7 @@ global:
     database: airbyte
     user: airbyte
     password: ""  # This will be overridden by secretName/secretValue
+  
   logs:
     accessKey:
       password: minio
@@ -54,6 +55,9 @@ webapp:
 server:
   enabled: true
   replicaCount: 1
+  serviceAccount:
+    create: false
+    name: airbyte
   env:
     - name: TRACKING_STRATEGY
       value: "segment"
@@ -68,18 +72,44 @@ server:
           key: DATABASE_PASSWORD
     - name: CONFIG_DATABASE_URL
       value: "jdbc:postgresql://airbyte-db-postgresql:5432/airbyte"
+    - name: WORKER_ENVIRONMENT
+      value: "kubernetes"
+    - name: WORKSPACE_DOCKER_MOUNT
+      value: "workspace"
+    - name: WORKSPACE_ROOT
+      value: "/tmp/workspace"
+    - name: LOCAL_ROOT
+      value: "/tmp/airbyte_local"
+    - name: CONFIG_ROOT
+      value: "/data/config"
 
 worker:
   enabled: true
   replicaCount: 1
+  serviceAccount:
+    create: false
+    name: airbyte
   env:
     - name: SYNC_JOB_MAX_ATTEMPTS
       value: "3"
     - name: SYNC_JOB_MAX_TIMEOUT_DAYS
       value: "3"
+    - name: WORKER_ENVIRONMENT
+      value: "kubernetes"
+    - name: WORKSPACE_DOCKER_MOUNT
+      value: "workspace"
+    - name: WORKSPACE_ROOT
+      value: "/tmp/workspace"
+    - name: LOCAL_ROOT
+      value: "/tmp/airbyte_local"
+    - name: CONFIG_ROOT
+      value: "/data/config"
 
 airbyte-bootloader:
   enabled: true
+  serviceAccount:
+    create: false
+    name: airbyte
   env:
     - name: DATABASE_USER
       value: "airbyte"
@@ -94,6 +124,9 @@ airbyte-bootloader:
 temporal:
   enabled: true
   replicaCount: 1
+  serviceAccount:
+    create: false
+    name: airbyte
 
 postgresql:
   enabled: false  # We'll use external PostgreSQL
@@ -112,6 +145,49 @@ minio:
   auth:
     rootUser: minio
     rootPassword: minio123
+  serviceAccount:
+    create: false
+    name: airbyte
+
+# Workload Launcher configuration
+workload-launcher:
+  enabled: true
+  serviceAccount:
+    create: false
+    name: airbyte
+  env:
+    - name: KUBERNETES_CLIENT_MAX_IDLE_CONNECTIONS
+      value: "10"
+    - name: WORKLOAD_LAUNCHER_PARALLELISM
+      value: "10"
+
+# Pod template configuration
+pod-sweeper:
+  enabled: true
+  serviceAccount:
+    create: false
+    name: airbyte
+
+# Connector builder server
+connector-builder-server:
+  enabled: true
+  serviceAccount:
+    create: false
+    name: airbyte
+
+# Cron
+cron:
+  enabled: true
+  serviceAccount:
+    create: false
+    name: airbyte
+
+# Metrics (optional, disabled by default)
+metrics:
+  enabled: false
+  serviceAccount:
+    create: false
+    name: airbyte
 
 # Resource limits
 resources:
@@ -126,3 +202,190 @@ resources:
 podDisruptionBudget:
   enabled: true
   minAvailable: 1
+
+# Additional global configurations
+global:
+  # Ensure all components use the same service account
+  serviceAccount:
+    create: false
+    name: airbyte
+    annotations: {}
+  
+  # Job-related configurations
+  jobs:
+    resources:
+      limits:
+        cpu: 2000m
+        memory: 4Gi
+      requests:
+        cpu: 500m
+        memory: 1Gi
+    
+    # Kube job configs
+    kube:
+      annotations: {}
+      labels: {}
+      nodeSelector: {}
+      tolerations: []
+      
+      # Main container config
+      main_container_image_pull_secret: ""
+      
+      # Sidecar container config (for connectors)
+      sidecar_container:
+        image_pull_policy: IfNotPresent
+      
+      # Busybox image for init containers
+      busybox_image: "busybox:1.35"
+    
+    # Error reporting
+    errorReportingStrategy: logging
+    errorReportingStrategyCustomerEmail: ""
+
+# Airbyte Services Configuration
+api-server:
+  enabled: true
+  serviceAccount:
+    create: false
+    name: airbyte
+
+keycloak:
+  enabled: false  # Disable if not using enterprise features
+
+keycloak-setup:
+  enabled: false
+
+# Volume configurations
+persistence:
+  storageClass: "standard"  # GKE default storage class
+  accessMode: ReadWriteOnce
+  size: 500Mi
+
+# Security context for pods
+securityContext:
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+# Additional worker configurations
+worker:
+  # Activity-related environment variables
+  activityMaxAttempt: 10
+  activityInitialDelayBetweenAttemptsSeconds: 30
+  activityMaxDelayBetweenAttemptsSeconds: 600
+  
+  # Workflow-related settings
+  workflowFailureRestartDelaySeconds: 600
+  
+  # Check frequency
+  checkFrequencySeconds: 60
+  
+  # Connection manager
+  connectionManagerWorkflowRunTimeout: 43200  # 12 hours
+  
+  # Max workers
+  maxCheckWorkers: 15
+  maxDiscoverWorkers: 15
+  maxSpecWorkers: 15
+  maxSyncWorkers: 35
+  maxNotifyWorkers: 5
+  
+  # Resource limits for job pods
+  job:
+    main:
+      resources:
+        requests:
+          cpu: 250m
+          memory: 1Gi
+        limits:
+          cpu: 2000m
+          memory: 4Gi
+    
+    sidecar:
+      resources:
+        requests:
+          cpu: 250m
+          memory: 512Mi
+        limits:
+          cpu: 1000m
+          memory: 2Gi
+
+# Server-specific configurations
+server:
+  # Log level
+  logLevel: INFO
+  
+  # Additional server settings
+  secretsManagerSecretsTtlDays: 365
+  
+  # Workspace settings
+  workspaceDockerMount: workspace
+  workspaceRoot: /tmp/workspace
+  
+  # Job-related settings
+  jobMainContainerCpuRequest: 250m
+  jobMainContainerCpuLimit: 2000m
+  jobMainContainerMemoryRequest: 1Gi
+  jobMainContainerMemoryLimit: 4Gi
+
+# Temporal settings
+temporal:
+  extraEnv:
+    - name: SQL_TLS
+      value: "false"
+    - name: SQL_TLS_ENABLED
+      value: "false"
+  
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 1Gi
+
+# MinIO specific settings for state storage
+minio:
+  defaultBuckets: "airbyte-state-storage,airbyte-log-storage"
+  persistence:
+    enabled: true
+    size: 50Gi
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 250m
+    limits:
+      memory: 1Gi
+      cpu: 1000m
+
+# Webapp specific settings
+webapp:
+  extraEnv:
+    - name: REACT_APP_INTERCOM_APP_ID
+      value: ""
+    - name: REACT_APP_OSANO_ID
+      value: ""
+  
+  resources:
+    limits:
+      cpu: 500m
+      memory: 1Gi
+    requests:
+      cpu: 250m
+      memory: 512Mi
+
+# Additional helm configurations
+fullnameOverride: ""
+nameOverride: ""
+
+# Image pull secrets (if using private registries)
+imagePullSecrets: []
+
+# Node selector for pod assignment
+nodeSelector: {}
+
+# Tolerations for pod assignment
+tolerations: []
+
+# Affinity rules
+affinity: {}
