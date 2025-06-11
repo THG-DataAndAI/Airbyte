@@ -338,7 +338,7 @@ jobs:
           if ! gcloud dns managed-zones describe $ZONE_NAME 2>/dev/null; then
             echo "DNS Zone $ZONE_NAME does not exist. Creating it..."
             gcloud dns managed-zones create $ZONE_NAME \
-              --dns-name=thg.dev. \
+              --dns-name=thg-reporting.com. \
               --description="THG Development Zone" \
               --visibility=public
           fi
