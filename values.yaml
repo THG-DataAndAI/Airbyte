@@ -3,6 +3,8 @@ global:
   deploymentMode: oss
   configMapName: airbyte-airbyte-env
   secretName: airbyte-airbyte-secrets
+  auth:
+    enabled: true
   database:
     secretName: airbyte-db-secrets
     secretValue: DATABASE_PASSWORD
