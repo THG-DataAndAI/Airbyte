@@ -6,8 +6,9 @@ global:
   auth:
     enabled: true
     initialUser:
-      email: AIRBYTE_ADMIN_USER 
-      password: AIRBYTE_ADMIN_PASSWORD
+      # These will be overridden by helm command line values
+      email: admin@airbyte.io 
+      password: changeme
 
   database:
     secretName: airbyte-db-secrets
@@ -50,10 +51,16 @@ webapp:
       - secretName: airbyte-tls
         hosts:
           - airbyte.thg-reporting.com
+  env:
+    - name: INTERNAL_API_HOST
+      value: airbyte-server-svc:8001
 
 server:
   enabled: true
   replicaCount: 1
+  service:
+    type: ClusterIP
+    port: 8001
   env:
     - name: TRACKING_STRATEGY
       value: "segment"
@@ -68,15 +75,32 @@ server:
           key: DATABASE_PASSWORD
     - name: CONFIG_DATABASE_URL
       value: "jdbc:postgresql://airbyte-db-postgresql:5432/airbyte"
+    - name: TEMPORAL_HOST
+      value: "airbyte-temporal:7233"
+    - name: INTERNAL_API_HOST
+      value: "airbyte-server-svc:8001"
 
 worker:
   enabled: true
-  replicaCount: 1
+  replicaCount: 2
   env:
     - name: SYNC_JOB_MAX_ATTEMPTS
       value: "3"
     - name: SYNC_JOB_MAX_TIMEOUT_DAYS
       value: "3"
+    - name: INTERNAL_API_HOST
+      value: "airbyte-server-svc:8001"
+    - name: TEMPORAL_HOST
+      value: "airbyte-temporal:7233"
+    - name: DATABASE_USER
+      value: "airbyte"
+    - name: DATABASE_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: airbyte-db-secrets
+          key: DATABASE_PASSWORD
+    - name: DATABASE_URL
+      value: "jdbc:postgresql://airbyte-db-postgresql:5432/airbyte"
 
 airbyte-bootloader:
   enabled: true
@@ -94,6 +118,22 @@ airbyte-bootloader:
 temporal:
   enabled: true
   replicaCount: 1
+  env:
+    - name: DB
+      value: "postgresql"
+    - name: DB_PORT
+      value: "5432"
+    - name: POSTGRES_USER
+      value: "airbyte"
+    - name: POSTGRES_PWD
+      valueFrom:
+        secretKeyRef:
+          name: airbyte-db-secrets
+          key: DATABASE_PASSWORD
+    - name: POSTGRES_SEEDS
+      value: "airbyte-db-postgresql"
+    - name: DYNAMIC_CONFIG_FILE_PATH
+      value: "config/dynamicconfig/development.yaml"
 
 postgresql:
   enabled: false  # We'll use external PostgreSQL
@@ -113,6 +153,15 @@ minio:
     rootUser: minio
     rootPassword: minio123
 
+# Pod annotations for service mesh/network policy
+podAnnotations:
+  sidecar.istio.io/inject: "false"  # Disable istio sidecar if present
+
+# Service accounts
+serviceAccount:
+  create: false  # We already create it manually
+  name: airbyte
+
 # Resource limits
 resources:
   limits:
@@ -126,3 +175,40 @@ resources:
 podDisruptionBudget:
   enabled: true
   minAvailable: 1
+
+# Enable pod-to-pod communication
+global:
+  jobs:
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 2Gi
+      requests:
+        cpu: 500m
+        memory: 1Gi
+  
+# Connector builder server
+connector-builder-server:
+  enabled: true
+  service:
+    type: ClusterIP
+    port: 80
+
+# API server configuration
+api-server:
+  enabled: true
+  service:
+    type: ClusterIP
+    port: 8006
+  env:
+    - name: INTERNAL_API_HOST
+      value: "airbyte-server-svc:8001"
+    - name: CONNECTOR_BUILDER_SERVER_API_HOST
+      value: "airbyte-connector-builder-server-svc:80"
+
+# Cron jobs
+cron:
+  enabled: true
+  env:
+    - name: INTERNAL_API_HOST
+      value: "airbyte-server-svc:8001"
