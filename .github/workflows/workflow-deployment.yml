@@ -22,6 +22,9 @@ env:
   ZONE: europe-west2-a
   CLUSTER_NAME: ${{ github.event.inputs.cluster_name }}
   NAMESPACE: airbyte
+  # Pre-defined credentials
+  AIRBYTE_USERNAME: admin@airbyte.io
+  AIRBYTE_PASSWORD: ${{ secrets.AIRBYTE_ADMIN_PASSWORD }}
 
 jobs:
   deploy:
@@ -77,6 +80,18 @@ jobs:
       run: |
         gcloud container clusters get-credentials ${{ env.CLUSTER_NAME }} --region=${{ env.REGION }}
 
+    - name: Grant cluster-admin to service account
+      if: github.event.inputs.action == 'deploy'
+      run: |
+        # Get the current user email
+        CURRENT_USER=$(gcloud config get-value account)
+        
+        # Grant cluster-admin role to the service account
+        kubectl create clusterrolebinding cluster-admin-binding \
+          --clusterrole=cluster-admin \
+          --user=$CURRENT_USER \
+          --dry-run=client -o yaml | kubectl apply -f -
+
     - name: Install Helm
       if: github.event.inputs.action == 'deploy'
       uses: azure/setup-helm@v3
@@ -105,7 +120,22 @@ jobs:
     - name: Create RBAC permissions for Airbyte
       if: github.event.inputs.action == 'deploy'
       run: |
-        # Create Role with necessary permissions
+        # Create ClusterRole for pod-to-pod communication
+        cat <<EOF | kubectl apply -f -
+        apiVersion: rbac.authorization.k8s.io/v1
+        kind: ClusterRole
+        metadata:
+          name: airbyte-cluster-role
+        rules:
+        - apiGroups: [""]
+          resources: ["nodes"]
+          verbs: ["get", "list"]
+        - apiGroups: [""]
+          resources: ["services", "endpoints"]
+          verbs: ["get", "list", "watch"]
+        EOF
+        
+        # Create Role with necessary permissions for the namespace
         cat <<EOF | kubectl apply -f -
         apiVersion: rbac.authorization.k8s.io/v1
         kind: Role
@@ -121,10 +151,22 @@ jobs:
           verbs: ["get", "list", "create", "update", "patch", "delete"]
         - apiGroups: [""]
           resources: ["pods"]
-          verbs: ["get", "list", "watch"]
+          verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
         - apiGroups: [""]
           resources: ["pods/logs"]
           verbs: ["get", "list"]
+        - apiGroups: [""]
+          resources: ["pods/exec"]
+          verbs: ["create", "get"]
+        - apiGroups: [""]
+          resources: ["services"]
+          verbs: ["get", "list", "create", "update", "patch", "delete"]
+        - apiGroups: ["apps"]
+          resources: ["deployments", "replicasets"]
+          verbs: ["get", "list", "create", "update", "patch", "delete"]
+        - apiGroups: ["batch"]
+          resources: ["jobs"]
+          verbs: ["get", "list", "create", "update", "patch", "delete", "watch"]
         EOF
         
         # Create RoleBinding
@@ -143,6 +185,69 @@ jobs:
           name: airbyte
           namespace: ${{ env.NAMESPACE }}
         EOF
+        
+        # Create ClusterRoleBinding
+        cat <<EOF | kubectl apply -f -
+        apiVersion: rbac.authorization.k8s.io/v1
+        kind: ClusterRoleBinding
+        metadata:
+          name: airbyte-cluster-rolebinding
+        roleRef:
+          apiGroup: rbac.authorization.k8s.io
+          kind: ClusterRole
+          name: airbyte-cluster-role
+        subjects:
+        - kind: ServiceAccount
+          name: airbyte
+          namespace: ${{ env.NAMESPACE }}
+        EOF
+
+    - name: Create Network Policy for pod communication
+      if: github.event.inputs.action == 'deploy'
+      run: |
+        cat <<EOF | kubectl apply -f -
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        metadata:
+          name: airbyte-network-policy
+          namespace: ${{ env.NAMESPACE }}
+        spec:
+          podSelector: {}
+          policyTypes:
+          - Ingress
+          - Egress
+          ingress:
+          - from:
+            - namespaceSelector:
+                matchLabels:
+                  name: ${{ env.NAMESPACE }}
+            - podSelector: {}
+          egress:
+          - to:
+            - namespaceSelector:
+                matchLabels:
+                  name: ${{ env.NAMESPACE }}
+            - podSelector: {}
+          - to:
+            - namespaceSelector: {}
+            ports:
+            - protocol: TCP
+              port: 53
+            - protocol: UDP
+              port: 53
+          - to:
+            - namespaceSelector: {}
+            ports:
+            - protocol: TCP
+              port: 443
+            - protocol: TCP
+              port: 80
+        EOF
+
+    - name: Label namespace for network policy
+      if: github.event.inputs.action == 'deploy'
+      run: |
+        kubectl label namespace ${{ env.NAMESPACE }} name=${{ env.NAMESPACE }} --overwrite
 
     - name: Install cert-manager
       if: github.event.inputs.action == 'deploy'
@@ -193,6 +298,15 @@ jobs:
           --from-literal=DATABASE_PASSWORD=${{ secrets.AIRBYTE_DB_PASSWORD }} \
           --dry-run=client -o yaml | kubectl apply -f -
 
+    - name: Create Airbyte admin credentials secret
+      if: github.event.inputs.action == 'deploy'
+      run: |
+        kubectl create secret generic airbyte-admin-credentials \
+          --namespace=${{ env.NAMESPACE }} \
+          --from-literal=AIRBYTE_ADMIN_USER=${{ env.AIRBYTE_USERNAME }} \
+          --from-literal=AIRBYTE_ADMIN_PASSWORD=${{ secrets.AIRBYTE_ADMIN_PASSWORD }} \
+          --dry-run=client -o yaml | kubectl apply -f -
+
     - name: Validate secrets
       if: github.event.inputs.action == 'deploy'
       run: |
@@ -204,6 +318,13 @@ jobs:
           echo ""
           echo "You can generate a strong password with:"
           echo "openssl rand -base64 32"
+          exit 1
+        fi
+        
+        if [ -z "${{ secrets.AIRBYTE_ADMIN_PASSWORD }}" ]; then
+          echo "ERROR: AIRBYTE_ADMIN_PASSWORD secret is not set!"
+          echo "Please add this secret in your repository settings."
+          echo "This will be the password for the Airbyte admin user."
           exit 1
         fi
         
@@ -247,6 +368,8 @@ jobs:
           --namespace=${{ env.NAMESPACE }} \
           --from-literal=AIRBYTE_VERSION=0.50.0 \
           --from-literal=RUN_DATABASE_MIGRATION_ON_STARTUP=true \
+          --from-literal=INTERNAL_API_HOST=airbyte-server-svc:8001 \
+          --from-literal=CONNECTOR_BUILDER_API_HOST=airbyte-connector-builder-server-svc:80 \
           --dry-run=client -o yaml | kubectl apply -f -
         
         # Create the airbyte-airbyte-env configmap with additional settings
@@ -263,6 +386,9 @@ jobs:
           --from-literal=MICROMETER_METRICS_STATSD_ENABLED=false \
           --from-literal=STATSD_HOST=localhost \
           --from-literal=STATSD_PORT=8125 \
+          --from-literal=INTERNAL_API_HOST=airbyte-server-svc:8001 \
+          --from-literal=CONNECTOR_BUILDER_API_HOST=airbyte-connector-builder-server-svc:80 \
+          --from-literal=TEMPORAL_HOST=airbyte-temporal:7233 \
           --dry-run=client -o yaml | kubectl apply -f -
 
     - name: Deploy Airbyte
@@ -270,14 +396,19 @@ jobs:
       run: |
         # Set database password as environment variable to avoid issues with special characters
         export DB_PASSWORD="${{ secrets.AIRBYTE_DB_PASSWORD }}"
+        export ADMIN_PASSWORD="${{ secrets.AIRBYTE_ADMIN_PASSWORD }}"
         
         # Deploy Airbyte with proper database configuration
         helm upgrade --install airbyte airbyte/airbyte \
           --namespace=${{ env.NAMESPACE }} \
           --values values.yaml \
+          --set global.serviceAccountName=airbyte \
           --set global.database.user=airbyte \
           --set global.database.password="$DB_PASSWORD" \
           --set global.database.existingSecret="" \
+          --set global.auth.enabled=true \
+          --set global.auth.initialUser.email="${{ env.AIRBYTE_USERNAME }}" \
+          --set global.auth.initialUser.password="$ADMIN_PASSWORD" \
           --set postgresql.enabled=false \
           --set externalDatabase.host=airbyte-db-postgresql \
           --set externalDatabase.user=airbyte \
@@ -465,9 +596,9 @@ jobs:
         echo "DNS has been configured automatically."
         echo "Please wait 2-5 minutes for DNS propagation."
         echo ""
-        echo "Initial credentials:"
-        echo "Username: airbyte"
-        echo "Password: password (change immediately after first login)"
+        echo "Login credentials:"
+        echo "Username: ${{ env.AIRBYTE_USERNAME }}"
+        echo "Password: [Set in AIRBYTE_ADMIN_PASSWORD secret]"
         echo "=========================================="
 
     - name: Wait for DNS propagation
@@ -554,6 +685,9 @@ jobs:
         # Delete cert-manager
         helm uninstall cert-manager -n cert-manager || true
         kubectl delete namespace cert-manager || true
+        
+        # Delete cluster-admin binding
+        kubectl delete clusterrolebinding cluster-admin-binding || true
         
         # Delete GKE cluster
         echo "Deleting GKE cluster..."
