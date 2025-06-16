@@ -101,7 +101,6 @@ jobs:
       if: github.event.inputs.action == 'deploy'
       run: |
         kubectl create serviceaccount airbyte -n ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
-
     - name: Create RBAC permissions for Airbyte
       if: github.event.inputs.action == 'deploy'
       run: |
@@ -121,10 +120,16 @@ jobs:
           verbs: ["get", "list", "create", "update", "patch", "delete"]
         - apiGroups: [""]
           resources: ["pods"]
-          verbs: ["get", "list", "watch"]
+          verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
         - apiGroups: [""]
           resources: ["pods/logs"]
           verbs: ["get", "list"]
+        - apiGroups: [""]
+          resources: ["pods/status"]
+          verbs: ["get", "patch"]
+        - apiGroups: ["batch"]
+          resources: ["jobs"]
+          verbs: ["get", "list", "create", "update", "patch", "delete"]
         EOF
         
         # Create RoleBinding
