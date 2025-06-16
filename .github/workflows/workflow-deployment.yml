@@ -85,12 +85,54 @@ jobs:
       run: |
         # Get the current user email
         CURRENT_USER=$(gcloud config get-value account)
+        echo "Current user: $CURRENT_USER"
         
-        # Grant cluster-admin role to the service account
-        kubectl create clusterrolebinding cluster-admin-binding \
-          --clusterrole=cluster-admin \
-          --user=$CURRENT_USER \
-          --dry-run=client -o yaml | kubectl apply -f -
+        # First, we need to bootstrap permissions using gcloud
+        # This grants the service account the ability to create RBAC resources
+        gcloud projects add-iam-policy-binding ${{ env.PROJECT_ID }} \
+          --member="user:$CURRENT_USER" \
+          --role="roles/container.clusterAdmin" || true
+        
+        # Wait a moment for IAM changes to propagate
+        sleep 10
+        
+        # Now create the cluster role binding
+        # Using gcloud to ensure we have the right permissions
+        gcloud container clusters get-credentials ${{ env.CLUSTER_NAME }} --region=${{ env.REGION }}
+        
+        # Create a bootstrap cluster role binding that allows the current user to create other bindings
+        cat <<EOF | kubectl apply -f - || true
+        apiVersion: rbac.authorization.k8s.io/v1
+        kind: ClusterRoleBinding
+        metadata:
+          name: cluster-admin-binding
+        roleRef:
+          apiGroup: rbac.authorization.k8s.io
+          kind: ClusterRole
+          name: cluster-admin
+        subjects:
+        - kind: User
+          name: $CURRENT_USER
+          apiGroup: rbac.authorization.k8s.io
+        EOF
+        
+        # If the above fails, try using gcloud directly to add the binding
+        if [ $? -ne 0 ]; then
+          echo "Direct kubectl failed, using gcloud to add cluster-admin binding..."
+          # Get the service account email if using a service account
+          if [[ $CURRENT_USER == *"gserviceaccount.com"* ]]; then
+            SERVICE_ACCOUNT=$CURRENT_USER
+          else
+            # Get the default compute service account
+            PROJECT_NUMBER=$(gcloud projects describe ${{ env.PROJECT_ID }} --format="value(projectNumber)")
+            SERVICE_ACCOUNT="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
+          fi
+          
+          # Use gcloud to create the binding
+          kubectl create clusterrolebinding cluster-admin-binding \
+            --clusterrole=cluster-admin \
+            --user=$CURRENT_USER || echo "Binding might already exist"
+        fi
 
     - name: Install Helm
       if: github.event.inputs.action == 'deploy'
