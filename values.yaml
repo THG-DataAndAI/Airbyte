@@ -126,3 +126,24 @@ resources:
 podDisruptionBudget:
   enabled: true
   minAvailable: 1
+
+# dbt configuration for transformations
+dbt:
+  enabled: true
+  host: dbt-service
+  port: 8080
+  schema: dbt_transforms
+
+# Configure Airbyte to use dbt for normalization
+normalization:
+  enabled: false  # Disable default normalization to use dbt instead
+
+# Configure dbt transformations
+transformations:
+  enabled: true
+  dbt:
+    enabled: true
+    host: dbt-service
+    port: 8080
+    database: airbyte
+    schema: dbt_transforms

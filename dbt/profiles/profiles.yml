@@ -1,0 +1,26 @@
+airbyte_dbt:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: "{{ env_var('DBT_DATABASE_HOST', 'airbyte-db-postgresql') }}"
+      user: "{{ env_var('DBT_DATABASE_USER', 'airbyte') }}"
+      password: "{{ env_var('DBT_DATABASE_PASSWORD') }}"
+      port: "{{ env_var('DBT_DATABASE_PORT', '5432') | as_number }}"
+      dbname: "{{ env_var('DBT_DATABASE_NAME', 'airbyte') }}"
+      schema: "{{ env_var('DBT_SCHEMA', 'dbt_transforms') }}"
+      threads: 4
+      keepalives_idle: 0
+      search_path: "dbt_transforms,public"
+      
+    prod:
+      type: postgres
+      host: "{{ env_var('DBT_DATABASE_HOST', 'airbyte-db-postgresql') }}"
+      user: "{{ env_var('DBT_DATABASE_USER', 'airbyte') }}"
+      password: "{{ env_var('DBT_DATABASE_PASSWORD') }}"
+      port: "{{ env_var('DBT_DATABASE_PORT', '5432') | as_number }}"
+      dbname: "{{ env_var('DBT_DATABASE_NAME', 'airbyte') }}"
+      schema: "{{ env_var('DBT_SCHEMA', 'dbt_transforms') }}"
+      threads: 8
+      keepalives_idle: 0
+      search_path: "dbt_transforms,public"
