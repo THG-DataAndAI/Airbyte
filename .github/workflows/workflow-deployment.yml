@@ -40,12 +40,7 @@ jobs:
 
     - name: Configure Docker for GCR
       run: |
-        # Configure Docker to use gcloud as a credential helper
-        gcloud auth configure-docker --quiet
-        
-        # Also try direct authentication method
-        echo "Configuring direct GCR authentication..."
-        gcloud auth print-access-token | docker login -u oauth2accesstoken --password-stdin https://gcr.io
+        gcloud auth configure-docker
 
     - name: Install gke-gcloud-auth-plugin
       if: github.event.inputs.action == 'deploy'
@@ -389,53 +384,32 @@ jobs:
         # Verify the image was built
         docker images | grep dbt-airbyte
         
-        # Configure Docker authentication for GCR (refresh auth)
-        echo "Refreshing GCR authentication..."
-        gcloud auth configure-docker gcr.io --quiet
-        
-        # Alternative: Try direct authentication
-        gcloud auth print-access-token | docker login -u oauth2accesstoken --password-stdin https://gcr.io
-        
         # Push to Google Container Registry
         echo "Pushing image to GCR..."
         
-        # Simple push without timeout command
+        # Simple push - let it use the already configured Docker credentials
         if docker push gcr.io/${{ env.PROJECT_ID }}/dbt-airbyte:latest; then
           echo "Docker push successful!"
+          echo "DBT_IMAGE=gcr.io/${{ env.PROJECT_ID }}/dbt-airbyte:latest" >> $GITHUB_ENV
         else
-          echo "Docker push failed, trying alternative approach..."
+          echo "Docker push failed"
+          echo "Debug information:"
+          echo "==================="
           
-          # Try tagging with a simpler name and pushing
-          docker tag gcr.io/${{ env.PROJECT_ID }}/dbt-airbyte:latest gcr.io/${{ env.PROJECT_ID }}/dbt:latest
+          # Check Docker daemon
+          docker version
           
-          if docker push gcr.io/${{ env.PROJECT_ID }}/dbt:latest; then
-            echo "Docker push successful with alternative tag!"
-            # Update the image name for deployment
-            echo "DBT_IMAGE=gcr.io/${{ env.PROJECT_ID }}/dbt:latest" >> $GITHUB_ENV
-          else
-            echo "Docker push failed"
-            echo "Debug information:"
-            echo "==================="
-            
-            # Check Docker daemon
-            docker version
-            
-            # Check images
-            echo "Docker images:"
-            docker images
-            
-            # Check GCR permissions
-            echo "Checking GCR permissions..."
-            gcloud projects get-iam-policy ${{ env.PROJECT_ID }} --flatten="bindings[].members" --format="table(bindings.role)" --filter="bindings.members:serviceAccount:*"
-            
-            # Check if we can list images in GCR
-            echo "Existing GCR images:"
-            gcloud container images list --repository=gcr.io/${{ env.PROJECT_ID }} || echo "Cannot list GCR images"
-            
-            echo "==================="
-            echo "Continuing without custom dbt image - will use pre-built image"
-            echo "DBT_IMAGE=ghcr.io/dbt-labs/dbt-postgres:1.7.4" >> $GITHUB_ENV
-          fi
+          # Check images
+          echo "Docker images:"
+          docker images | grep dbt
+          
+          # Check if we can list images in GCR
+          echo "Testing GCR access..."
+          gcloud container images list --repository=gcr.io/${{ env.PROJECT_ID }} || echo "Cannot list GCR images"
+          
+          echo "==================="
+          echo "Continuing without custom dbt image - will use pre-built image"
+          echo "DBT_IMAGE=ghcr.io/dbt-labs/dbt-postgres:1.7.4" >> $GITHUB_ENV
         fi
 
     - name: Deploy dbt service
