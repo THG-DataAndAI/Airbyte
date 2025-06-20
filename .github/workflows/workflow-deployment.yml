@@ -360,57 +360,17 @@ jobs:
           psql -U airbyte -d airbyte -c "CREATE SCHEMA IF NOT EXISTS dbt_transforms;" || \
           echo "Schema might already exist, continuing..."
 
-    - name: Build and deploy dbt Docker image
+    - name: Setup dbt deployment
       if: github.event.inputs.action == 'deploy'
-      timeout-minutes: 10
       run: |
-        echo "Building dbt Docker image..."
+        echo "Setting up dbt deployment..."
         
-        # Ensure we're in the correct directory
-        if [ -d "dbt" ]; then
-          cd dbt
-        else
-          echo "Error: dbt directory not found"
-          exit 1
-        fi
+        # Skip custom Docker build to avoid hanging issues
+        # Use pre-built official dbt image instead
+        echo "Using pre-built dbt-postgres image to avoid build/push issues"
+        echo "DBT_IMAGE=ghcr.io/dbt-labs/dbt-postgres:1.7.4" >> $GITHUB_ENV
         
-        # Build the Docker image
-        echo "Building Docker image..."
-        docker build -t gcr.io/${{ env.PROJECT_ID }}/dbt-airbyte:latest . || {
-          echo "Docker build failed"
-          exit 1
-        }
-        
-        # Verify the image was built
-        docker images | grep dbt-airbyte
-        
-        # Push to Google Container Registry
-        echo "Pushing image to GCR..."
-        
-        # Simple push - let it use the already configured Docker credentials
-        if docker push gcr.io/${{ env.PROJECT_ID }}/dbt-airbyte:latest; then
-          echo "Docker push successful!"
-          echo "DBT_IMAGE=gcr.io/${{ env.PROJECT_ID }}/dbt-airbyte:latest" >> $GITHUB_ENV
-        else
-          echo "Docker push failed"
-          echo "Debug information:"
-          echo "==================="
-          
-          # Check Docker daemon
-          docker version
-          
-          # Check images
-          echo "Docker images:"
-          docker images | grep dbt
-          
-          # Check if we can list images in GCR
-          echo "Testing GCR access..."
-          gcloud container images list --repository=gcr.io/${{ env.PROJECT_ID }} || echo "Cannot list GCR images"
-          
-          echo "==================="
-          echo "Continuing without custom dbt image - will use pre-built image"
-          echo "DBT_IMAGE=ghcr.io/dbt-labs/dbt-postgres:1.7.4" >> $GITHUB_ENV
-        fi
+        echo "dbt will be deployed using the official pre-built image"
 
     - name: Deploy dbt service
       if: github.event.inputs.action == 'deploy'

@@ -61,11 +61,8 @@ kubectl create namespace airbyte
 helm repo add bitnami https://charts.bitnami.com/bitnami
 helm install airbyte-db bitnami/postgresql --namespace=airbyte
 
-# Build and deploy dbt
-cd dbt
-docker build -t gcr.io/$PROJECT_ID/dbt-airbyte:latest .
-docker push gcr.io/$PROJECT_ID/dbt-airbyte:latest
-kubectl apply -f k8s/dbt-deployment.yaml
+# Deploy dbt (using pre-built image)
+kubectl apply -f dbt/k8s/dbt-deployment-simple.yaml
 
 # Deploy Airbyte
 helm repo add airbyte https://airbytehq.github.io/helm-charts
