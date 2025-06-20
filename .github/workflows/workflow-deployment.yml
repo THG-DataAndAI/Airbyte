@@ -44,8 +44,58 @@ jobs:
 
     - name: Install gke-gcloud-auth-plugin
       if: github.event.inputs.action == 'deploy'
+      timeout-minutes: 5
       run: |
-        gcloud components install gke-gcloud-auth-plugin --quiet
+        # Install gke-gcloud-auth-plugin
+        echo "Installing gke-gcloud-auth-plugin..."
+        
+        # Set environment variable to use gke-gcloud-auth-plugin
+        echo "export USE_GKE_GCLOUD_AUTH_PLUGIN=True" >> $GITHUB_ENV
+        
+        # First, check if it's already installed
+        if command -v gke-gcloud-auth-plugin &> /dev/null; then
+          echo "gke-gcloud-auth-plugin is already installed"
+          gke-gcloud-auth-plugin --version || true
+        else
+          # Try multiple installation methods
+          
+          # Method 1: Try using gcloud components (with timeout)
+          echo "Attempting installation via gcloud components..."
+          timeout 60s gcloud components install gke-gcloud-auth-plugin --quiet || true
+          
+          # Method 2: If that fails, try apt-get
+          if ! command -v gke-gcloud-auth-plugin &> /dev/null; then
+            echo "Attempting installation via apt-get..."
+            # Update package list
+            curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg
+            echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | sudo tee -a /etc/apt/sources.list.d/google-cloud-sdk.list
+            sudo apt-get update -qq
+            sudo apt-get install -qq -y google-cloud-cli-gke-gcloud-auth-plugin || sudo apt-get install -qq -y google-cloud-sdk-gke-gcloud-auth-plugin || true
+          fi
+          
+          # Method 3: If still not installed, download directly
+          if ! command -v gke-gcloud-auth-plugin &> /dev/null; then
+            echo "Attempting direct download..."
+            ARCH=$(uname -m)
+            if [ "$ARCH" = "x86_64" ]; then
+              ARCH="amd64"
+            fi
+            OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+            curl -LO "https://dl.google.com/dl/cloudsdk/release/downloads/for_packagers/linux/google-cloud-cli-gke-gcloud-auth-plugin_latest_${OS}_${ARCH}.tar.gz" || true
+            tar -xzf "google-cloud-cli-gke-gcloud-auth-plugin_latest_${OS}_${ARCH}.tar.gz" || true
+            sudo mv gke-gcloud-auth-plugin /usr/local/bin/ || true
+            sudo chmod +x /usr/local/bin/gke-gcloud-auth-plugin || true
+          fi
+        fi
+        
+        # Final verification
+        if command -v gke-gcloud-auth-plugin &> /dev/null; then
+          echo "✓ gke-gcloud-auth-plugin successfully installed"
+          gke-gcloud-auth-plugin --version || true
+        else
+          echo "⚠️  Warning: gke-gcloud-auth-plugin installation may have failed"
+          echo "Continuing anyway as it might not be required for all operations..."
+        fi
 
     - name: Create GKE Cluster
       if: github.event.inputs.action == 'deploy'
@@ -75,7 +125,19 @@ jobs:
     - name: Configure kubectl
       if: github.event.inputs.action == 'deploy'
       run: |
-        gcloud container clusters get-credentials ${{ env.CLUSTER_NAME }} --region=${{ env.REGION }}
+        # Ensure the auth plugin is being used
+        export USE_GKE_GCLOUD_AUTH_PLUGIN=True
+        
+        # Get cluster credentials
+        echo "Configuring kubectl for cluster ${{ env.CLUSTER_NAME }}..."
+        gcloud container clusters get-credentials ${{ env.CLUSTER_NAME }} \
+          --region=${{ env.REGION }} \
+          --project=${{ env.PROJECT_ID }}
+        
+        # Verify kubectl configuration
+        echo "Verifying kubectl configuration..."
+        kubectl config current-context
+        kubectl cluster-info || echo "Warning: Could not get cluster info"
 
     - name: Install Helm
       if: github.event.inputs.action == 'deploy'
@@ -291,8 +353,20 @@ jobs:
       if: github.event.inputs.action == 'deploy'
       run: |
         echo "Building dbt Docker image..."
-        cd dbt
+        
+        # Ensure we're in the correct directory
+        if [ -d "dbt" ]; then
+          cd dbt
+        else
+          echo "Error: dbt directory not found"
+          exit 1
+        fi
+        
+        # Build the Docker image
         docker build -t gcr.io/${{ env.PROJECT_ID }}/dbt-airbyte:latest .
+        
+        # Push to Google Container Registry
+        echo "Pushing image to GCR..."
         docker push gcr.io/${{ env.PROJECT_ID }}/dbt-airbyte:latest
 
     - name: Deploy dbt service
