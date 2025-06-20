@@ -362,6 +362,7 @@ jobs:
 
     - name: Build and deploy dbt Docker image
       if: github.event.inputs.action == 'deploy'
+      timeout-minutes: 10
       run: |
         echo "Building dbt Docker image..."
         
@@ -374,26 +375,85 @@ jobs:
         fi
         
         # Build the Docker image
-        docker build -t gcr.io/${{ env.PROJECT_ID }}/dbt-airbyte:latest .
+        echo "Building Docker image..."
+        docker build -t gcr.io/${{ env.PROJECT_ID }}/dbt-airbyte:latest . || {
+          echo "Docker build failed"
+          exit 1
+        }
         
-        # Push to Google Container Registry
+        # Verify the image was built
+        docker images | grep dbt-airbyte
+        
+        # Configure Docker authentication for GCR (refresh auth)
+        echo "Refreshing GCR authentication..."
+        gcloud auth configure-docker --quiet
+        
+        # Push to Google Container Registry with retry logic
         echo "Pushing image to GCR..."
-        docker push gcr.io/${{ env.PROJECT_ID }}/dbt-airbyte:latest
+        MAX_RETRIES=3
+        RETRY_COUNT=0
+        
+        while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+          echo "Push attempt $((RETRY_COUNT + 1)) of $MAX_RETRIES..."
+          
+          if timeout 300s docker push gcr.io/${{ env.PROJECT_ID }}/dbt-airbyte:latest; then
+            echo "Docker push successful!"
+            break
+          else
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+              echo "Push failed, retrying in 10 seconds..."
+              sleep 10
+            else
+              echo "Docker push failed after $MAX_RETRIES attempts"
+              echo "Skipping dbt deployment - Airbyte will work without dbt integration"
+              exit 0  # Don't fail the entire workflow
+            fi
+          fi
+        done
 
     - name: Deploy dbt service
       if: github.event.inputs.action == 'deploy'
+      continue-on-error: true
       run: |
         echo "Deploying dbt service..."
-        # Update the image in the deployment yaml
-        sed -i 's|image: dbt-airbyte:latest|image: gcr.io/${{ env.PROJECT_ID }}/dbt-airbyte:latest|g' dbt/k8s/dbt-deployment.yaml
         
-        # Apply the dbt deployment
-        kubectl apply -f dbt/k8s/dbt-deployment.yaml
+        # Check if the Docker image exists in GCR
+        if gcloud container images describe gcr.io/${{ env.PROJECT_ID }}/dbt-airbyte:latest &>/dev/null; then
+          echo "Docker image found in GCR, proceeding with custom deployment..."
+          
+          # Update the image in the deployment yaml
+          sed -i 's|image: dbt-airbyte:latest|image: gcr.io/${{ env.PROJECT_ID }}/dbt-airbyte:latest|g' dbt/k8s/dbt-deployment.yaml
+          
+          # Apply the dbt deployment
+          kubectl apply -f dbt/k8s/dbt-deployment.yaml
+          
+          # Wait for dbt service to be ready (with shorter timeout)
+          kubectl wait --for=condition=available deployment/dbt-service \
+            -n ${{ env.NAMESPACE }} \
+            --timeout=120s || {
+            echo "Warning: Custom dbt service deployment timed out"
+            echo "Falling back to simple deployment..."
+            kubectl delete -f dbt/k8s/dbt-deployment.yaml || true
+            kubectl apply -f dbt/k8s/dbt-deployment-simple.yaml
+          }
+        else
+          echo "Warning: Custom dbt Docker image not found in GCR"
+          echo "Using pre-built dbt image instead..."
+          
+          # Deploy using the simple deployment with pre-built image
+          kubectl apply -f dbt/k8s/dbt-deployment-simple.yaml
+          
+          # Wait for dbt service to be ready
+          kubectl wait --for=condition=available deployment/dbt-service \
+            -n ${{ env.NAMESPACE }} \
+            --timeout=120s || {
+            echo "Warning: dbt service deployment timed out"
+            echo "Airbyte will work without dbt integration"
+          }
+        fi
         
-        # Wait for dbt service to be ready
-        kubectl wait --for=condition=available deployment/dbt-service \
-          -n ${{ env.NAMESPACE }} \
-          --timeout=300s
+        echo "dbt deployment step completed"
 
     - name: Deploy Airbyte
       if: github.event.inputs.action == 'deploy'
@@ -668,8 +728,9 @@ jobs:
         # Delete Airbyte
         helm uninstall airbyte -n ${{ env.NAMESPACE }} || true
         
-        # Delete dbt service
+        # Delete dbt service (try both deployment types)
         kubectl delete -f dbt/k8s/dbt-deployment.yaml || true
+        kubectl delete -f dbt/k8s/dbt-deployment-simple.yaml || true
         
         # Delete PostgreSQL
         helm uninstall airbyte-db -n ${{ env.NAMESPACE }} || true

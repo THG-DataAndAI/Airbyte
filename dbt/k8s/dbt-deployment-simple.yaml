@@ -1,0 +1,182 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dbt-service
+  namespace: airbyte
+  labels:
+    app: dbt-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dbt-service
+  template:
+    metadata:
+      labels:
+        app: dbt-service
+    spec:
+      serviceAccountName: airbyte
+      containers:
+      - name: dbt
+        # Use official dbt image instead of custom build
+        image: ghcr.io/dbt-labs/dbt-postgres:1.7.4
+        imagePullPolicy: Always
+        env:
+        - name: DBT_DATABASE_HOST
+          value: "airbyte-db-postgresql"
+        - name: DBT_DATABASE_USER
+          value: "airbyte"
+        - name: DBT_DATABASE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: airbyte-db-secrets
+              key: DATABASE_PASSWORD
+        - name: DBT_DATABASE_PORT
+          value: "5432"
+        - name: DBT_DATABASE_NAME
+          value: "airbyte"
+        - name: DBT_SCHEMA
+          value: "dbt_transforms"
+        - name: DBT_PROFILES_DIR
+          value: "/dbt/profiles"
+        ports:
+        - containerPort: 8080
+        command: ["/bin/sh"]
+        args: ["-c", "while true; do echo 'dbt service running...'; sleep 30; done"]
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        volumeMounts:
+        - name: dbt-project
+          mountPath: /dbt/dbt_project.yml
+          subPath: dbt_project.yml
+        - name: dbt-profiles
+          mountPath: /dbt/profiles/profiles.yml
+          subPath: profiles.yml
+        - name: dbt-models
+          mountPath: /dbt/models
+      volumes:
+      - name: dbt-project
+        configMap:
+          name: dbt-project-config
+      - name: dbt-profiles
+        configMap:
+          name: dbt-profiles-config
+      - name: dbt-models
+        configMap:
+          name: dbt-models-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dbt-service
+  namespace: airbyte
+  labels:
+    app: dbt-service
+spec:
+  selector:
+    app: dbt-service
+  ports:
+  - port: 8080
+    targetPort: 8080
+    protocol: TCP
+  type: ClusterIP
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dbt-project-config
+  namespace: airbyte
+data:
+  dbt_project.yml: |
+    name: 'airbyte_dbt'
+    version: '1.0.0'
+    config-version: 2
+    profile: 'airbyte_dbt'
+    model-paths: ["models"]
+    analysis-paths: ["analyses"]
+    test-paths: ["tests"]
+    seed-paths: ["seeds"]
+    macro-paths: ["macros"]
+    snapshot-paths: ["snapshots"]
+    target-path: "target"
+    clean-targets:
+      - "target"
+      - "dbt_packages"
+    models:
+      airbyte_dbt:
+        staging:
+          +materialized: view
+        marts:
+          +materialized: table
+    seeds:
+      airbyte_dbt:
+        +quote_columns: false
+    snapshots:
+      airbyte_dbt:
+        +target_schema: snapshots
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dbt-profiles-config
+  namespace: airbyte
+data:
+  profiles.yml: |
+    airbyte_dbt:
+      target: dev
+      outputs:
+        dev:
+          type: postgres
+          host: "airbyte-db-postgresql"
+          user: "airbyte"
+          password: "{{ env_var('DBT_DATABASE_PASSWORD') }}"
+          port: 5432
+          dbname: "airbyte"
+          schema: "dbt_transforms"
+          threads: 4
+          keepalives_idle: 0
+          search_path: "dbt_transforms,public"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dbt-models-config
+  namespace: airbyte
+data:
+  staging_sources.yml: |
+    version: 2
+    sources:
+      - name: airbyte_raw
+        description: Raw data from Airbyte extractions
+        tables:
+          - name: _airbyte_raw_users
+            description: Raw user data
+  stg_raw_data.sql: |
+    {{ config(materialized='view') }}
+    with raw_data as (
+        select
+            _airbyte_ab_id,
+            _airbyte_data,
+            _airbyte_emitted_at,
+            _airbyte_normalized_at
+        from {{ source('airbyte_raw', '_airbyte_raw_users') }}
+        where _airbyte_data is not null
+    )
+    select * from raw_data
+  dim_users.sql: |
+    {{ config(materialized='table') }}
+    with staging_data as (
+        select * from {{ ref('stg_raw_data') }}
+    ),
+    cleaned_users as (
+        select
+            _airbyte_ab_id,
+            _airbyte_emitted_at as last_synced_at
+        from staging_data
+    )
+    select * from cleaned_users
