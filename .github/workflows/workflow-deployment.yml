@@ -198,6 +198,13 @@ jobs:
           --from-literal=DATABASE_PASSWORD=${{ secrets.AIRBYTE_DB_PASSWORD }} \
           --dry-run=client -o yaml | kubectl apply -f -
 
+        # Create OAuth secrets
+        kubectl create secret generic airbyte-oauth-secrets \
+          --namespace=${{ env.NAMESPACE }} \
+          --from-literal=OAUTH_CLIENT_ID=${{ secrets.OAUTH_CLIENT_ID }} \
+          --from-literal=OAUTH_CLIENT_SECRET=${{ secrets.OAUTH_CLIENT_SECRET }} \
+          --dry-run=client -o yaml | kubectl apply -f -
+
     - name: Validate secrets
       if: github.event.inputs.action == 'deploy'
       run: |

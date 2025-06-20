@@ -5,8 +5,21 @@ global:
   secretName: airbyte-airbyte-secrets
   auth:
     enabled: true
+    # OAuth Configuration
+    oauth:
+      enabled: true
+      provider: "google"  # Options: google, github, azure, okta, keycloak
+      clientId: ""  # Will be set via secret or environment variable
+      clientSecret: ""  # Will be set via secret
+      redirectUri: "https://airbyte.thg-reporting.com/auth/callback"
+      # Additional OAuth settings
+      scope: "openid email profile"
+      authorizationUrl: ""  # Provider-specific
+      tokenUrl: ""  # Provider-specific
+      userInfoUrl: ""  # Provider-specific
+    # Fallback admin user (optional, for emergency access)
     initialUser:
-      email: AIRBYTE_ADMIN_USER 
+      email: AIRBYTE_ADMIN_USER
       password: AIRBYTE_ADMIN_PASSWORD
 
   database:
@@ -68,6 +81,25 @@ server:
           key: DATABASE_PASSWORD
     - name: CONFIG_DATABASE_URL
       value: "jdbc:postgresql://airbyte-db-postgresql:5432/airbyte"
+    # OAuth Configuration
+    - name: OAUTH_ENABLED
+      value: "true"
+    - name: OAUTH_PROVIDER
+      value: "google"
+    - name: OAUTH_CLIENT_ID
+      valueFrom:
+        secretKeyRef:
+          name: airbyte-oauth-secrets
+          key: OAUTH_CLIENT_ID
+    - name: OAUTH_CLIENT_SECRET
+      valueFrom:
+        secretKeyRef:
+          name: airbyte-oauth-secrets
+          key: OAUTH_CLIENT_SECRET
+    - name: OAUTH_REDIRECT_URI
+      value: "https://airbyte.thg-reporting.com/auth/callback"
+    - name: OAUTH_SCOPE
+      value: "openid email profile"
 
 worker:
   enabled: true
