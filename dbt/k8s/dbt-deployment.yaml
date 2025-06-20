@@ -51,11 +51,18 @@ spec:
             cpu: "500m"
         volumeMounts:
         - name: dbt-project
-          mountPath: /dbt
+          mountPath: /dbt/dbt_project.yml
+          subPath: dbt_project.yml
+        - name: dbt-profiles
+          mountPath: /dbt/profiles/profiles.yml
+          subPath: profiles.yml
       volumes:
       - name: dbt-project
         configMap:
           name: dbt-project-config
+      - name: dbt-profiles
+        configMap:
+          name: dbt-profiles-config
 ---
 apiVersion: v1
 kind: Service
@@ -106,3 +113,25 @@ data:
     snapshots:
       airbyte_dbt:
         +target_schema: snapshots
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dbt-profiles-config
+  namespace: airbyte
+data:
+  profiles.yml: |
+    airbyte_dbt:
+      target: dev
+      outputs:
+        dev:
+          type: postgres
+          host: "airbyte-db-postgresql"
+          user: "airbyte"
+          password: "{{ env_var('DBT_DATABASE_PASSWORD') }}"
+          port: 5432
+          dbname: "airbyte"
+          schema: "dbt_transforms"
+          threads: 4
+          keepalives_idle: 0
+          search_path: "dbt_transforms,public"

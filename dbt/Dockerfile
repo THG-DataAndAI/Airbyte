@@ -15,8 +15,13 @@ RUN pip install --no-cache-dir \
     dbt-postgres==1.7.4 \
     dbt-bigquery==1.7.4
 
+# Create necessary directories
+RUN mkdir -p /dbt/models/staging /dbt/models/marts /dbt/profiles
+
 # Copy dbt project files
-COPY . .
+COPY dbt_project.yml /dbt/
+COPY profiles/ /dbt/profiles/
+COPY models/ /dbt/models/
 
 # Set environment variables
 ENV DBT_PROFILES_DIR=/dbt/profiles
