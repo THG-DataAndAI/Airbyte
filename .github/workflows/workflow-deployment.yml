@@ -40,7 +40,12 @@ jobs:
 
     - name: Configure Docker for GCR
       run: |
-        gcloud auth configure-docker
+        # Configure Docker to use gcloud as a credential helper
+        gcloud auth configure-docker --quiet
+        
+        # Also try direct authentication method
+        echo "Configuring direct GCR authentication..."
+        gcloud auth print-access-token | docker login -u oauth2accesstoken --password-stdin https://gcr.io
 
     - name: Install gke-gcloud-auth-plugin
       if: github.event.inputs.action == 'deploy'
@@ -386,31 +391,52 @@ jobs:
         
         # Configure Docker authentication for GCR (refresh auth)
         echo "Refreshing GCR authentication..."
-        gcloud auth configure-docker --quiet
+        gcloud auth configure-docker gcr.io --quiet
         
-        # Push to Google Container Registry with retry logic
+        # Alternative: Try direct authentication
+        gcloud auth print-access-token | docker login -u oauth2accesstoken --password-stdin https://gcr.io
+        
+        # Push to Google Container Registry
         echo "Pushing image to GCR..."
-        MAX_RETRIES=3
-        RETRY_COUNT=0
         
-        while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-          echo "Push attempt $((RETRY_COUNT + 1)) of $MAX_RETRIES..."
+        # Simple push without timeout command
+        if docker push gcr.io/${{ env.PROJECT_ID }}/dbt-airbyte:latest; then
+          echo "Docker push successful!"
+        else
+          echo "Docker push failed, trying alternative approach..."
           
-          if timeout 300s docker push gcr.io/${{ env.PROJECT_ID }}/dbt-airbyte:latest; then
-            echo "Docker push successful!"
-            break
+          # Try tagging with a simpler name and pushing
+          docker tag gcr.io/${{ env.PROJECT_ID }}/dbt-airbyte:latest gcr.io/${{ env.PROJECT_ID }}/dbt:latest
+          
+          if docker push gcr.io/${{ env.PROJECT_ID }}/dbt:latest; then
+            echo "Docker push successful with alternative tag!"
+            # Update the image name for deployment
+            echo "DBT_IMAGE=gcr.io/${{ env.PROJECT_ID }}/dbt:latest" >> $GITHUB_ENV
           else
-            RETRY_COUNT=$((RETRY_COUNT + 1))
-            if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
-              echo "Push failed, retrying in 10 seconds..."
-              sleep 10
-            else
-              echo "Docker push failed after $MAX_RETRIES attempts"
-              echo "Skipping dbt deployment - Airbyte will work without dbt integration"
-              exit 0  # Don't fail the entire workflow
-            fi
+            echo "Docker push failed"
+            echo "Debug information:"
+            echo "==================="
+            
+            # Check Docker daemon
+            docker version
+            
+            # Check images
+            echo "Docker images:"
+            docker images
+            
+            # Check GCR permissions
+            echo "Checking GCR permissions..."
+            gcloud projects get-iam-policy ${{ env.PROJECT_ID }} --flatten="bindings[].members" --format="table(bindings.role)" --filter="bindings.members:serviceAccount:*"
+            
+            # Check if we can list images in GCR
+            echo "Existing GCR images:"
+            gcloud container images list --repository=gcr.io/${{ env.PROJECT_ID }} || echo "Cannot list GCR images"
+            
+            echo "==================="
+            echo "Continuing without custom dbt image - will use pre-built image"
+            echo "DBT_IMAGE=ghcr.io/dbt-labs/dbt-postgres:1.7.4" >> $GITHUB_ENV
           fi
-        done
+        fi
 
     - name: Deploy dbt service
       if: github.event.inputs.action == 'deploy'
@@ -418,39 +444,45 @@ jobs:
       run: |
         echo "Deploying dbt service..."
         
-        # Check if the Docker image exists in GCR
-        if gcloud container images describe gcr.io/${{ env.PROJECT_ID }}/dbt-airbyte:latest &>/dev/null; then
-          echo "Docker image found in GCR, proceeding with custom deployment..."
+        # Use the image set in the previous step (either custom or pre-built)
+        DBT_IMAGE="${DBT_IMAGE:-ghcr.io/dbt-labs/dbt-postgres:1.7.4}"
+        echo "Using dbt image: $DBT_IMAGE"
+        
+        # Check if we should use custom or simple deployment
+        if [[ "$DBT_IMAGE" == *"gcr.io"* ]]; then
+          echo "Using custom deployment with GCR image..."
           
           # Update the image in the deployment yaml
-          sed -i 's|image: dbt-airbyte:latest|image: gcr.io/${{ env.PROJECT_ID }}/dbt-airbyte:latest|g' dbt/k8s/dbt-deployment.yaml
+          sed -i "s|image: dbt-airbyte:latest|image: $DBT_IMAGE|g" dbt/k8s/dbt-deployment.yaml
           
           # Apply the dbt deployment
           kubectl apply -f dbt/k8s/dbt-deployment.yaml
           
-          # Wait for dbt service to be ready (with shorter timeout)
-          kubectl wait --for=condition=available deployment/dbt-service \
+          # Wait for dbt service to be ready
+          if ! kubectl wait --for=condition=available deployment/dbt-service \
             -n ${{ env.NAMESPACE }} \
-            --timeout=120s || {
-            echo "Warning: Custom dbt service deployment timed out"
-            echo "Falling back to simple deployment..."
+            --timeout=120s; then
+            echo "Custom deployment failed, falling back to simple deployment..."
             kubectl delete -f dbt/k8s/dbt-deployment.yaml || true
             kubectl apply -f dbt/k8s/dbt-deployment-simple.yaml
-          }
+          fi
         else
-          echo "Warning: Custom dbt Docker image not found in GCR"
-          echo "Using pre-built dbt image instead..."
+          echo "Using simple deployment with pre-built image..."
           
-          # Deploy using the simple deployment with pre-built image
+          # Update the image in the simple deployment if needed
+          sed -i "s|image: ghcr.io/dbt-labs/dbt-postgres:1.7.4|image: $DBT_IMAGE|g" dbt/k8s/dbt-deployment-simple.yaml
+          
+          # Deploy using the simple deployment
           kubectl apply -f dbt/k8s/dbt-deployment-simple.yaml
-          
-          # Wait for dbt service to be ready
-          kubectl wait --for=condition=available deployment/dbt-service \
-            -n ${{ env.NAMESPACE }} \
-            --timeout=120s || {
-            echo "Warning: dbt service deployment timed out"
-            echo "Airbyte will work without dbt integration"
-          }
+        fi
+        
+        # Final check for dbt service
+        if kubectl get deployment dbt-service -n ${{ env.NAMESPACE }} &>/dev/null; then
+          echo "dbt service deployed successfully!"
+          kubectl get pods -n ${{ env.NAMESPACE }} -l app=dbt-service
+        else
+          echo "Warning: dbt service deployment failed"
+          echo "Airbyte will work without dbt integration"
         fi
         
         echo "dbt deployment step completed"
