@@ -1,0 +1,43 @@
+version: 2
+
+sources:
+  - name: airbyte_raw
+    description: Raw data loaded by Airbyte
+    database: airbyte
+    schema: public
+    tables:
+      # Generic Airbyte tables
+      - name: _airbyte_raw_stream
+        description: Generic raw stream data from Airbyte
+        columns:
+          - name: _airbyte_ab_id
+            description: Airbyte unique identifier
+          - name: _airbyte_data
+            description: Raw JSON data
+          - name: _airbyte_emitted_at
+            description: Timestamp when record was emitted
+            
+      # Shopify specific tables (add more as needed)
+      - name: _airbyte_raw_customers
+        description: Raw Shopify customers data
+        
+      - name: _airbyte_raw_orders
+        description: Raw Shopify orders data
+        
+      - name: _airbyte_raw_products
+        description: Raw Shopify products data
+        
+      - name: _airbyte_raw_inventory_items
+        description: Raw Shopify inventory data
+
+  - name: airbyte_normalized
+    description: Normalized data from Airbyte (if normalization is enabled)
+    database: airbyte
+    schema: public
+    tables:
+      - name: customers
+        description: Normalized customers table
+      - name: orders
+        description: Normalized orders table
+      - name: products
+        description: Normalized products table

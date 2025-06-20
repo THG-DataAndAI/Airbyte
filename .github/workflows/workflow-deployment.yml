@@ -332,94 +332,6 @@ jobs:
           --from-literal=STATSD_PORT=8125 \
           --dry-run=client -o yaml | kubectl apply -f -
 
-    - name: Setup dbt schema in database
-      if: github.event.inputs.action == 'deploy'
-      run: |
-        echo "Setting up dbt schema in PostgreSQL..."
-        export DB_PASSWORD="${{ secrets.AIRBYTE_DB_PASSWORD }}"
-        
-        # Wait for PostgreSQL to be ready
-        kubectl wait --for=condition=ready pod \
-          -l app.kubernetes.io/name=postgresql \
-          -n ${{ env.NAMESPACE }} \
-          --timeout=300s
-        
-        # Get the PostgreSQL pod name
-        POSTGRES_POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l app.kubernetes.io/name=postgresql -o jsonpath='{.items[0].metadata.name}')
-        
-        if [ -z "$POSTGRES_POD" ]; then
-          echo "Error: PostgreSQL pod not found"
-          exit 1
-        fi
-        
-        echo "Found PostgreSQL pod: $POSTGRES_POD"
-        
-        # Create dbt schema using the pod name
-        kubectl exec -n ${{ env.NAMESPACE }} \
-          $POSTGRES_POD -- \
-          psql -U airbyte -d airbyte -c "CREATE SCHEMA IF NOT EXISTS dbt_transforms;" || \
-          echo "Schema might already exist, continuing..."
-
-    - name: Setup dbt deployment
-      if: github.event.inputs.action == 'deploy'
-      run: |
-        echo "Setting up dbt deployment..."
-        
-        # Skip custom Docker build to avoid hanging issues
-        # Use pre-built official dbt image instead
-        echo "Using pre-built dbt-postgres image to avoid build/push issues"
-        echo "DBT_IMAGE=ghcr.io/dbt-labs/dbt-postgres:1.7.4" >> $GITHUB_ENV
-        
-        echo "dbt will be deployed using the official pre-built image"
-
-    - name: Deploy dbt service
-      if: github.event.inputs.action == 'deploy'
-      continue-on-error: true
-      run: |
-        echo "Deploying dbt service..."
-        
-        # Use the image set in the previous step (either custom or pre-built)
-        DBT_IMAGE="${DBT_IMAGE:-ghcr.io/dbt-labs/dbt-postgres:1.7.4}"
-        echo "Using dbt image: $DBT_IMAGE"
-        
-        # Check if we should use custom or simple deployment
-        if [[ "$DBT_IMAGE" == *"gcr.io"* ]]; then
-          echo "Using custom deployment with GCR image..."
-          
-          # Update the image in the deployment yaml
-          sed -i "s|image: dbt-airbyte:latest|image: $DBT_IMAGE|g" dbt/k8s/dbt-deployment.yaml
-          
-          # Apply the dbt deployment
-          kubectl apply -f dbt/k8s/dbt-deployment.yaml
-          
-          # Wait for dbt service to be ready
-          if ! kubectl wait --for=condition=available deployment/dbt-service \
-            -n ${{ env.NAMESPACE }} \
-            --timeout=120s; then
-            echo "Custom deployment failed, falling back to simple deployment..."
-            kubectl delete -f dbt/k8s/dbt-deployment.yaml || true
-            kubectl apply -f dbt/k8s/dbt-deployment-simple.yaml
-          fi
-        else
-          echo "Using simple deployment with pre-built image..."
-          
-          # Update the image in the simple deployment if needed
-          sed -i "s|image: ghcr.io/dbt-labs/dbt-postgres:1.7.4|image: $DBT_IMAGE|g" dbt/k8s/dbt-deployment-simple.yaml
-          
-          # Deploy using the simple deployment
-          kubectl apply -f dbt/k8s/dbt-deployment-simple.yaml
-        fi
-        
-        # Final check for dbt service
-        if kubectl get deployment dbt-service -n ${{ env.NAMESPACE }} &>/dev/null; then
-          echo "dbt service deployed successfully!"
-          kubectl get pods -n ${{ env.NAMESPACE }} -l app=dbt-service
-        else
-          echo "Warning: dbt service deployment failed"
-          echo "Airbyte will work without dbt integration"
-        fi
-        
-        echo "dbt deployment step completed"
 
     - name: Deploy Airbyte
       if: github.event.inputs.action == 'deploy'
@@ -693,10 +605,6 @@ jobs:
         
         # Delete Airbyte
         helm uninstall airbyte -n ${{ env.NAMESPACE }} || true
-        
-        # Delete dbt service (try both deployment types)
-        kubectl delete -f dbt/k8s/dbt-deployment.yaml || true
-        kubectl delete -f dbt/k8s/dbt-deployment-simple.yaml || true
         
         # Delete PostgreSQL
         helm uninstall airbyte-db -n ${{ env.NAMESPACE }} || true

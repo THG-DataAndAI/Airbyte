@@ -1,0 +1,140 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dbt-project-config
+  namespace: dbt
+data:
+  dbt_project.yml: |
+    name: 'airbyte_transformations'
+    version: '1.0.0'
+    config-version: 2
+    profile: 'airbyte_transformations'
+    model-paths: ["models"]
+    analysis-paths: ["analyses"]
+    test-paths: ["tests"]
+    seed-paths: ["seeds"]
+    macro-paths: ["macros"]
+    snapshot-paths: ["snapshots"]
+    target-path: "target"
+    clean-targets:
+      - "target"
+      - "dbt_packages"
+    models:
+      airbyte_transformations:
+        +materialized: view
+        staging:
+          +materialized: view
+          +schema: staging
+        marts:
+          +materialized: table
+          +schema: marts
+    vars:
+      source_schema: 'public'
+      target_schema: 'dbt_transforms'
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dbt-profiles-config
+  namespace: dbt
+data:
+  profiles.yml: |
+    airbyte_transformations:
+      target: prod
+      outputs:
+        prod:
+          type: postgres
+          host: "airbyte-db-postgresql.airbyte.svc.cluster.local"
+          user: "airbyte"
+          password: "{{ env_var('DBT_PASSWORD') }}"
+          port: 5432
+          dbname: "airbyte"
+          schema: "dbt_transforms"
+          threads: 4
+          keepalives_idle: 0
+          search_path: "dbt_transforms,public"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dbt-models-config
+  namespace: dbt
+data:
+  sources.yml: |
+    version: 2
+    sources:
+      - name: airbyte_raw
+        description: Raw data loaded by Airbyte
+        database: airbyte
+        schema: public
+        tables:
+          - name: _airbyte_raw_customers
+            description: Raw Shopify customers data
+          - name: _airbyte_raw_orders
+            description: Raw Shopify orders data
+          - name: _airbyte_raw_products
+            description: Raw Shopify products data
+  
+  stg_shopify_customers.sql: |
+    {{ config(materialized='view', schema='staging') }}
+    with raw_customers as (
+        select
+            _airbyte_ab_id,
+            _airbyte_emitted_at,
+            jsonb_extract_path_text(_airbyte_data, 'id')::bigint as customer_id,
+            jsonb_extract_path_text(_airbyte_data, 'email') as email,
+            jsonb_extract_path_text(_airbyte_data, 'first_name') as first_name,
+            jsonb_extract_path_text(_airbyte_data, 'last_name') as last_name,
+            jsonb_extract_path_text(_airbyte_data, 'created_at')::timestamp as created_at,
+            jsonb_extract_path_text(_airbyte_data, 'updated_at')::timestamp as updated_at,
+            _airbyte_data
+        from {{ source('airbyte_raw', '_airbyte_raw_customers') }}
+        where _airbyte_data is not null
+    )
+    select * from raw_customers
+  
+  stg_shopify_orders.sql: |
+    {{ config(materialized='view', schema='staging') }}
+    with raw_orders as (
+        select
+            _airbyte_ab_id,
+            _airbyte_emitted_at,
+            jsonb_extract_path_text(_airbyte_data, 'id')::bigint as order_id,
+            jsonb_extract_path_text(_airbyte_data, 'customer', 'id')::bigint as customer_id,
+            jsonb_extract_path_text(_airbyte_data, 'total_price')::decimal(10,2) as total_price,
+            jsonb_extract_path_text(_airbyte_data, 'created_at')::timestamp as created_at,
+            _airbyte_data
+        from {{ source('airbyte_raw', '_airbyte_raw_orders') }}
+        where _airbyte_data is not null
+    )
+    select * from raw_orders
+  
+  dim_customers.sql: |
+    {{ config(materialized='table', schema='marts') }}
+    with customers as (
+        select * from {{ ref('stg_shopify_customers') }}
+    ),
+    customer_orders as (
+        select
+            customer_id,
+            count(distinct order_id) as lifetime_order_count,
+            sum(total_price) as lifetime_value,
+            min(created_at) as first_order_date,
+            max(created_at) as last_order_date
+        from {{ ref('stg_shopify_orders') }}
+        where customer_id is not null
+        group by customer_id
+    ),
+    final as (
+        select
+            c.customer_id,
+            c.email,
+            c.first_name,
+            c.last_name,
+            coalesce(co.lifetime_order_count, 0) as lifetime_order_count,
+            coalesce(co.lifetime_value, 0) as lifetime_value,
+            current_timestamp as dbt_updated_at
+        from customers c
+        left join customer_orders co on c.customer_id = co.customer_id
+    )
+    select * from final
