@@ -61,46 +61,66 @@ kubectl create namespace airbyte
 helm repo add bitnami https://charts.bitnami.com/bitnami
 helm install airbyte-db bitnami/postgresql --namespace=airbyte
 
-# Deploy dbt (using pre-built image)
-kubectl apply -f dbt/k8s/dbt-deployment-simple.yaml
-
 # Deploy Airbyte
 helm repo add airbyte https://airbytehq.github.io/helm-charts
 helm install airbyte airbyte/airbyte --namespace=airbyte --values values.yaml
+
+# Deploy dbt CronJob
+kubectl apply -f dbt-config/k8s/dbt-cronjob.yaml
 ```
 
 ## dbt Configuration
 
-### Models Structure
+### New Consolidated Structure
+All dbt-related files are now organized in the `dbt-config/` directory:
+
 ```
-dbt/models/
-├── staging/
-│   ├── _sources.yml          # Source definitions
-│   └── stg_raw_data.sql      # Staging models
-└── marts/
-    ├── schema.yml            # Model documentation and tests
-    ├── dim_users.sql         # Dimension tables
-    └── fact_sync_metrics.sql # Fact tables
+dbt-config/
+├── README.md                 # dbt-specific documentation
+├── dbt_project.yml          # Main dbt project configuration
+├── profiles/                # Database connection profiles
+│   └── profiles.yml
+├── models/                  # dbt models
+│   ├── staging/            # Staging layer - raw data preparation
+│   │   ├── _sources.yml
+│   │   ├── stg_raw_data.sql
+│   │   ├── stg_shopify_customers.sql
+│   │   └── stg_shopify_orders.sql
+│   └── marts/              # Business logic layer
+│       ├── schema.yml
+│       ├── dim_users.sql
+│       ├── dim_customers.sql
+│       └── fact_sync_metrics.sql
+├── k8s/                    # Kubernetes configurations
+│   └── dbt-cronjob.yaml
+└── run-dbt-local.sh        # Local development script
 ```
 
 ### Running dbt Transformations
+
+#### Via GitHub Actions Workflow
+The dbt transformations can be triggered through the dedicated workflow:
+1. Go to Actions tab → "Run dbt Transformations"
+2. Choose action: `run`, `test`, `run-and-test`, or `deploy-cronjob`
+3. Select environment: `dev` or `prod`
+4. Optionally specify models to run
+
+#### Via Local Script
 ```bash
 # Make script executable
-chmod +x dbt/scripts/run_dbt.sh
+chmod +x dbt-config/run-dbt-local.sh
 
-# Run transformations
-./dbt/scripts/run_dbt.sh
+# Run the interactive script
+./dbt-config/run-dbt-local.sh
 ```
 
-### Manual dbt Commands
+#### Manual Kubernetes Execution
 ```bash
-# Connect to dbt pod
-kubectl exec -it deployment/dbt-service -n airbyte -- /bin/bash
+# Create a one-time job from the workflow
+gh workflow run dbt-workflow.yml -f action=run -f environment=prod
 
-# Inside the pod
-dbt run --profiles-dir /dbt/profiles
-dbt test --profiles-dir /dbt/profiles
-dbt docs generate --profiles-dir /dbt/profiles
+# Or use kubectl directly
+kubectl create job --from=cronjob/dbt-transformation-job dbt-manual-$(date +%s) -n airbyte
 ```
 
 ## Configuration
@@ -174,3 +194,24 @@ Run the teardown workflow to remove all resources:
 helm uninstall airbyte airbyte-db -n airbyte
 kubectl delete namespace airbyte
 gcloud container clusters delete $CLUSTER_NAME --region=$REGION
+```
+
+## Migration Notes
+
+### Migrating from Old dbt Structure
+If you have existing `dbt/` or `dbt-repo/` directories, use the cleanup script:
+```bash
+# Run the cleanup script to remove old directories
+./cleanup-old-dbt.sh
+```
+
+The script will:
+1. Create a backup of old directories
+2. Remove the old `dbt/` and `dbt-repo/` directories
+3. Keep the new consolidated structure in `dbt-config/`
+
+### Key Changes in New Structure
+- **Unified Configuration**: All dbt files now in `dbt-config/`
+- **GitHub Actions Workflow**: New dedicated workflow at `.github/workflows/dbt-workflow.yml`
+- **Improved Organization**: Clear separation between staging and mart models
+- **Local Development**: New script `dbt-config/run-dbt-local.sh` for easier local testing

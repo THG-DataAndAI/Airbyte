@@ -1,0 +1,74 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dbt-transformation-job
+  namespace: airbyte
+spec:
+  schedule: "0 */4 * * *"  # Run every 4 hours
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: airbyte
+          containers:
+          - name: dbt-run
+            image: ghcr.io/dbt-labs/dbt-postgres:1.7.4
+            command:
+            - /bin/bash
+            - -c
+            - |
+              echo "Starting dbt transformation run..."
+              echo "Current time: $(date)"
+              
+              # Run dbt deps if needed
+              dbt deps --profiles-dir=/dbt/profiles --project-dir=/dbt || true
+              
+              # Run dbt models
+              echo "Running dbt models..."
+              dbt run --profiles-dir=/dbt/profiles --project-dir=/dbt
+              
+              # Run dbt tests
+              echo "Running dbt tests..."
+              dbt test --profiles-dir=/dbt/profiles --project-dir=/dbt
+              
+              echo "dbt transformation completed at $(date)"
+            env:
+            - name: DBT_DATABASE_HOST
+              value: "airbyte-db-postgresql"
+            - name: DBT_DATABASE_USER
+              value: "airbyte"
+            - name: DBT_DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: airbyte-db-secrets
+                  key: DATABASE_PASSWORD
+            - name: DBT_DATABASE_PORT
+              value: "5432"
+            - name: DBT_DATABASE_NAME
+              value: "airbyte"
+            - name: DBT_SCHEMA
+              value: "dbt_transforms"
+            - name: DBT_PROFILES_DIR
+              value: "/dbt/profiles"
+            volumeMounts:
+            - name: dbt-project
+              mountPath: /dbt/dbt_project.yml
+              subPath: dbt_project.yml
+            - name: dbt-profiles
+              mountPath: /dbt/profiles/profiles.yml
+              subPath: profiles.yml
+            - name: dbt-models
+              mountPath: /dbt/models
+          volumes:
+          - name: dbt-project
+            configMap:
+              name: dbt-project-config
+          - name: dbt-profiles
+            configMap:
+              name: dbt-profiles-config
+          - name: dbt-models
+            configMap:
+              name: dbt-models-config
+          restartPolicy: OnFailure
