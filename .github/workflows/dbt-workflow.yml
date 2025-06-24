@@ -27,6 +27,21 @@ on:
         required: false
         default: ''
   
+  # Allow workflow to be triggered from specific branches
+  push:
+    branches:
+      - dbt-setup
+    paths:
+      - 'dbt-config/**'
+      - '.github/workflows/dbt-workflow.yml'
+  
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'dbt-config/**'
+      - '.github/workflows/dbt-workflow.yml'
+  
   schedule:
     # Run every 4 hours
     - cron: '0 */4 * * *'
