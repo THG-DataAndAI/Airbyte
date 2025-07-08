@@ -104,6 +104,17 @@ worker:
       cpu: "2"
       memory: "4Gi"
 
+workload-api-server:
+  enabled: true
+  env:
+    - name: CONNECTOR_CPU_REQUEST
+      value: "1000m"
+    - name: CONNECTOR_CPU_LIMIT
+      value: "4000m"
+    - name: CONNECTOR_MEMORY_REQUEST
+      value: "2Gi"
+    - name: CONNECTOR_MEMORY_LIMIT
+      value: "8Gi"
       
 airbyte-bootloader:
   enabled: true
