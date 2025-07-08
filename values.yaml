@@ -80,23 +80,32 @@ server:
 
 worker:
   enabled: true
-  replicaCount: 3
+  replicaCount: 1
   env:
     - name: SYNC_JOB_MAX_ATTEMPTS
       value: "3"
     - name: SYNC_JOB_MAX_TIMEOUT_DAYS
       value: "3"
-  # Add this section for container orchestrator config
-  containerOrchestratorConfig:
-    jobKube:
-      main:
-        resources:
-          requests:
-            cpu: "1"
-            memory: "2Gi"
-          limits:
-            cpu: "4"
-            memory: "8Gi"
+    # Container resource configurations for job pods
+    - name: CONTAINER_ORCHESTRATOR_ENABLED
+      value: "true"
+    - name: JOB_MAIN_CONTAINER_CPU_REQUEST
+      value: "1000m"
+    - name: JOB_MAIN_CONTAINER_CPU_LIMIT  
+      value: "4000m"
+    - name: JOB_MAIN_CONTAINER_MEMORY_REQUEST
+      value: "2Gi"
+    - name: JOB_MAIN_CONTAINER_MEMORY_LIMIT
+      value: "8Gi"
+    # Also set for source/destination containers
+    - name: JOB_SUBMITTER_CONTAINER_CPU_REQUEST
+      value: "1000m"
+    - name: JOB_SUBMITTER_CONTAINER_CPU_LIMIT
+      value: "4000m"
+    - name: JOB_SUBMITTER_CONTAINER_MEMORY_REQUEST
+      value: "2Gi"
+    - name: JOB_SUBMITTER_CONTAINER_MEMORY_LIMIT
+      value: "8Gi"
 
 airbyte-bootloader:
   enabled: true
