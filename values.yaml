@@ -80,7 +80,7 @@ server:
 
 worker:
   enabled: true
-  replicaCount: 1
+  replicaCount: 3
   env:
     - name: SYNC_JOB_MAX_ATTEMPTS
       value: "3"
