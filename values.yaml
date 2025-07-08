@@ -86,6 +86,13 @@ worker:
       value: "3"
     - name: SYNC_JOB_MAX_TIMEOUT_DAYS
       value: "3"
+  jobResources:
+    requests:
+      cpu: "1000m"
+      memory: "1Gi"
+    limits:
+      cpu: "4000m"
+      memory: "8Gi"
 
 airbyte-bootloader:
   enabled: true
