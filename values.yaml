@@ -8,15 +8,6 @@ global:
     initialUser:
       email: AIRBYTE_ADMIN_USER 
       password: AIRBYTE_ADMIN_PASSWORD
-  env:
-    - name: JOB_MAIN_CONTAINER_CPU_REQUEST
-      value: "1"
-    - name: JOB_MAIN_CONTAINER_CPU_LIMIT
-      value: "4"
-    - name: JOB_MAIN_CONTAINER_MEMORY_REQUEST
-      value: "2Gi"
-    - name: JOB_MAIN_CONTAINER_MEMORY_LIMIT
-      value: "8Gi"
 
   database:
     secretName: airbyte-db-secrets
@@ -88,6 +79,18 @@ worker:
     limits:
       cpu: "2"
       memory: "4Gi"
+
+workload-launcher:
+  enabled: true
+  env:
+    - name: JOB_MAIN_CONTAINER_CPU_REQUEST
+      value: "1"
+    - name: JOB_MAIN_CONTAINER_CPU_LIMIT
+      value: "4"
+    - name: JOB_MAIN_CONTAINER_MEMORY_REQUEST
+      value: "2Gi"
+    - name: JOB_MAIN_CONTAINER_MEMORY_LIMIT
+      value: "8Gi"
       
 airbyte-bootloader:
   enabled: true
