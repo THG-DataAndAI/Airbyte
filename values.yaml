@@ -86,13 +86,17 @@ worker:
       value: "3"
     - name: SYNC_JOB_MAX_TIMEOUT_DAYS
       value: "3"
-  jobResources:
-    requests:
-      cpu: "1000m"
-      memory: "1Gi"
-    limits:
-      cpu: "4000m"
-      memory: "8Gi"
+  # Add this section for container orchestrator config
+  containerOrchestratorConfig:
+    jobKube:
+      main:
+        resources:
+          requests:
+            cpu: "1"
+            memory: "2Gi"
+          limits:
+            cpu: "4"
+            memory: "8Gi"
 
 airbyte-bootloader:
   enabled: true
