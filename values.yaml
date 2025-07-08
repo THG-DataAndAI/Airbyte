@@ -8,6 +8,15 @@ global:
     initialUser:
       email: AIRBYTE_ADMIN_USER 
       password: AIRBYTE_ADMIN_PASSWORD
+  env:
+    - name: JOB_MAIN_CONTAINER_CPU_REQUEST
+      value: "1"
+    - name: JOB_MAIN_CONTAINER_CPU_LIMIT
+      value: "4"
+    - name: JOB_MAIN_CONTAINER_MEMORY_REQUEST
+      value: "2Gi"
+    - name: JOB_MAIN_CONTAINER_MEMORY_LIMIT
+      value: "8Gi"
 
   database:
     secretName: airbyte-db-secrets
@@ -26,15 +35,6 @@ global:
       password: minio123
       existingSecret: ""
       existingSecretKey: ""
-
-  jobs:
-    resources:
-      requests:
-        cpu: "200m"    # Increase from current 200m
-        memory: "1Gi"  # Increase from current 1Gi
-      limits:
-        cpu: "4"       # Increase from current 1
-        memory: "8Gi"  # Increase from current 2Gi
 
 webapp:
   enabled: true
@@ -81,21 +81,6 @@ server:
 worker:
   enabled: true
   replicaCount: 1
-  env:
-    - name: SYNC_JOB_MAX_ATTEMPTS
-      value: "3"
-    - name: SYNC_JOB_MAX_TIMEOUT_DAYS
-      value: "3"
-    # These are the correct env vars for job pod resources
-    - name: JOB_MAIN_CONTAINER_CPU_REQUEST
-      value: "1"
-    - name: JOB_MAIN_CONTAINER_CPU_LIMIT
-      value: "4"
-    - name: JOB_MAIN_CONTAINER_MEMORY_REQUEST
-      value: "2Gi"
-    - name: JOB_MAIN_CONTAINER_MEMORY_LIMIT
-      value: "8Gi"
-  # Also add direct resource configuration
   resources:
     requests:
       cpu: "500m"
@@ -103,18 +88,6 @@ worker:
     limits:
       cpu: "2"
       memory: "4Gi"
-
-workload-api-server:
-  enabled: true
-  env:
-    - name: CONNECTOR_CPU_REQUEST
-      value: "1000m"
-    - name: CONNECTOR_CPU_LIMIT
-      value: "4000m"
-    - name: CONNECTOR_MEMORY_REQUEST
-      value: "2Gi"
-    - name: CONNECTOR_MEMORY_LIMIT
-      value: "8Gi"
       
 airbyte-bootloader:
   enabled: true
