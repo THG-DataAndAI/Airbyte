@@ -17,6 +17,7 @@ global:
     database: airbyte
     user: airbyte
     password: ""  # This will be overridden by secretName/secretValue
+    
   logs:
     accessKey:
       password: minio
@@ -26,6 +27,16 @@ global:
       password: minio123
       existingSecret: ""
       existingSecretKey: ""
+      
+   env:
+    - name: JOB_MAIN_CONTAINER_CPU_REQUEST
+      value: "1"
+    - name: JOB_MAIN_CONTAINER_CPU_LIMIT
+      value: "4"
+    - name: JOB_MAIN_CONTAINER_MEMORY_REQUEST
+      value: "2Gi"
+    - name: JOB_MAIN_CONTAINER_MEMORY_LIMIT
+      value: "8Gi"
 
 webapp:
   enabled: true
