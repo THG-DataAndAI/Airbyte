@@ -27,6 +27,15 @@ global:
       existingSecret: ""
       existingSecretKey: ""
 
+  jobs:
+    resources:
+      requests:
+        cpu: "200m"    # Increase from current 200m
+        memory: "1Gi"  # Increase from current 1Gi
+      limits:
+        cpu: "4"       # Increase from current 1
+        memory: "8Gi"  # Increase from current 2Gi
+
 webapp:
   enabled: true
   replicaCount: 1
