@@ -86,27 +86,25 @@ worker:
       value: "3"
     - name: SYNC_JOB_MAX_TIMEOUT_DAYS
       value: "3"
-    # Container resource configurations for job pods
-    - name: CONTAINER_ORCHESTRATOR_ENABLED
-      value: "true"
+    # These are the correct env vars for job pod resources
     - name: JOB_MAIN_CONTAINER_CPU_REQUEST
-      value: "1000m"
-    - name: JOB_MAIN_CONTAINER_CPU_LIMIT  
-      value: "4000m"
+      value: "1"
+    - name: JOB_MAIN_CONTAINER_CPU_LIMIT
+      value: "4"
     - name: JOB_MAIN_CONTAINER_MEMORY_REQUEST
       value: "2Gi"
     - name: JOB_MAIN_CONTAINER_MEMORY_LIMIT
       value: "8Gi"
-    # Also set for source/destination containers
-    - name: JOB_SUBMITTER_CONTAINER_CPU_REQUEST
-      value: "1000m"
-    - name: JOB_SUBMITTER_CONTAINER_CPU_LIMIT
-      value: "4000m"
-    - name: JOB_SUBMITTER_CONTAINER_MEMORY_REQUEST
-      value: "2Gi"
-    - name: JOB_SUBMITTER_CONTAINER_MEMORY_LIMIT
-      value: "8Gi"
+  # Also add direct resource configuration
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+    limits:
+      cpu: "2"
+      memory: "4Gi"
 
+      
 airbyte-bootloader:
   enabled: true
   env:
