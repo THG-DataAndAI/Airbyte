@@ -25,7 +25,7 @@ env:
 
 jobs:
   deploy:
-    runs-on: airbyte-runner
+    runs-on: data-airbyte-runner
     environment: dev
     
     steps:
