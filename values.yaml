@@ -27,6 +27,35 @@ global:
       password: minio123
       existingSecret: ""
       existingSecretKey: ""
+  
+  env_vars:
+    # Main container resources
+    - name: JOB_MAIN_CONTAINER_CPU_REQUEST
+      value: "500m"
+    - name: JOB_MAIN_CONTAINER_CPU_LIMIT
+      value: "2"
+    - name: JOB_MAIN_CONTAINER_MEMORY_REQUEST
+      value: "1Gi"
+    - name: JOB_MAIN_CONTAINER_MEMORY_LIMIT
+      value: "4Gi"
+    # Source container resources
+    - name: SOURCE_CONTAINER_CPU_REQUEST
+      value: "500m"
+    - name: SOURCE_CONTAINER_CPU_LIMIT
+      value: "2"
+    - name: SOURCE_CONTAINER_MEMORY_REQUEST
+      value: "1Gi"
+    - name: SOURCE_CONTAINER_MEMORY_LIMIT
+      value: "4Gi"
+    # Destination container resources
+    - name: DESTINATION_CONTAINER_CPU_REQUEST
+      value: "500m"
+    - name: DESTINATION_CONTAINER_CPU_LIMIT
+      value: "2"
+    - name: DESTINATION_CONTAINER_MEMORY_REQUEST
+      value: "1Gi"
+    - name: DESTINATION_CONTAINER_MEMORY_LIMIT
+      value: "4Gi"
 
 webapp:
   enabled: true
@@ -83,34 +112,6 @@ worker:
 
 workload-launcher:
   enabled: true
-  env:
-    # Main container resources (updated to match Source/Destination)
-    - name: JOB_MAIN_CONTAINER_CPU_REQUEST
-      value: "500m"
-    - name: JOB_MAIN_CONTAINER_CPU_LIMIT
-      value: "2"
-    - name: JOB_MAIN_CONTAINER_MEMORY_REQUEST
-      value: "1Gi"
-    - name: JOB_MAIN_CONTAINER_MEMORY_LIMIT
-      value: "4Gi"
-    # Source container resources
-    - name: SOURCE_CONTAINER_CPU_REQUEST
-      value: "500m"
-    - name: SOURCE_CONTAINER_CPU_LIMIT
-      value: "2"
-    - name: SOURCE_CONTAINER_MEMORY_REQUEST
-      value: "1Gi"
-    - name: SOURCE_CONTAINER_MEMORY_LIMIT
-      value: "4Gi"
-    # Destination container resources
-    - name: DESTINATION_CONTAINER_CPU_REQUEST
-      value: "500m"
-    - name: DESTINATION_CONTAINER_CPU_LIMIT
-      value: "2"
-    - name: DESTINATION_CONTAINER_MEMORY_REQUEST
-      value: "1Gi"
-    - name: DESTINATION_CONTAINER_MEMORY_LIMIT
-      value: "4Gi"
 
 airbyte-bootloader:
   enabled: true
