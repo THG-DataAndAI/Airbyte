@@ -1,0 +1,15 @@
+# Add this step to your GitHub workflow AFTER the Helm deployment step
+
+- name: Patch Airbyte ConfigMap with Resource Limits
+  run: |
+    # Wait a moment for ConfigMap to be fully created
+    sleep 10
+    
+    # Apply the patch script
+    chmod +x patch-airbyte-configmap.sh
+    ./patch-airbyte-configmap.sh
+    
+    # Alternative inline approach (if you don't want to use the script file):
+    # kubectl patch configmap airbyte-airbyte-env -n airbyte --type merge -p '{"data":{"JOB_MAIN_CONTAINER_CPU_REQUEST":"500m","JOB_MAIN_CONTAINER_CPU_LIMIT":"2","JOB_MAIN_CONTAINER_MEMORY_REQUEST":"1Gi","JOB_MAIN_CONTAINER_MEMORY_LIMIT":"4Gi","SOURCE_CONTAINER_CPU_REQUEST":"500m","SOURCE_CONTAINER_CPU_LIMIT":"2","SOURCE_CONTAINER_MEMORY_REQUEST":"1Gi","SOURCE_CONTAINER_MEMORY_LIMIT":"4Gi","DESTINATION_CONTAINER_CPU_REQUEST":"500m","DESTINATION_CONTAINER_CPU_LIMIT":"2","DESTINATION_CONTAINER_MEMORY_REQUEST":"1Gi","DESTINATION_CONTAINER_MEMORY_LIMIT":"4Gi"}}'
+    # kubectl rollout restart deployment airbyte-workload-launcher -n airbyte
+    # kubectl rollout status deployment airbyte-workload-launcher -n airbyte --timeout=300s

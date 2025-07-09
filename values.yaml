@@ -36,6 +36,25 @@ global:
       requests:
         cpu: "500m"
         memory: "1Gi"
+    
+  # Container-specific resource limits
+  jobMainContainer:
+    cpuRequest: "500m"
+    cpuLimit: "2"
+    memoryRequest: "1Gi"
+    memoryLimit: "4Gi"
+  
+  sourceContainer:
+    cpuRequest: "500m"
+    cpuLimit: "2"
+    memoryRequest: "1Gi"
+    memoryLimit: "4Gi"
+    
+  destinationContainer:
+    cpuRequest: "500m"
+    cpuLimit: "2"
+    memoryRequest: "1Gi"
+    memoryLimit: "4Gi"
 
 webapp:
   enabled: true
@@ -92,31 +111,13 @@ worker:
 
 workload-launcher:
   enabled: true
-  extraEnv:
-    - name: JOB_MAIN_CONTAINER_CPU_REQUEST
-      value: "500m"
-    - name: JOB_MAIN_CONTAINER_CPU_LIMIT
-      value: "2"
-    - name: JOB_MAIN_CONTAINER_MEMORY_REQUEST
-      value: "1Gi"
-    - name: JOB_MAIN_CONTAINER_MEMORY_LIMIT
-      value: "4Gi"
-    - name: SOURCE_CONTAINER_CPU_REQUEST
-      value: "500m"
-    - name: SOURCE_CONTAINER_CPU_LIMIT
-      value: "2"
-    - name: SOURCE_CONTAINER_MEMORY_REQUEST
-      value: "1Gi"
-    - name: SOURCE_CONTAINER_MEMORY_LIMIT
-      value: "4Gi"
-    - name: DESTINATION_CONTAINER_CPU_REQUEST
-      value: "500m"
-    - name: DESTINATION_CONTAINER_CPU_LIMIT
-      value: "2"
-    - name: DESTINATION_CONTAINER_MEMORY_REQUEST
-      value: "1Gi"
-    - name: DESTINATION_CONTAINER_MEMORY_LIMIT
-      value: "4Gi"
+  containerResources:
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
 
 airbyte-bootloader:
   enabled: true
