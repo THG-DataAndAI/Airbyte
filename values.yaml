@@ -27,15 +27,7 @@ global:
       password: minio123
       existingSecret: ""
       existingSecretKey: ""
-  
-  jobs:
-    resources:
-      limits:
-        cpu: "2"
-        memory: "4Gi"
-      requests:
-        cpu: "500m"
-        memory: "1Gi"
+
 
 webapp:
   enabled: true
@@ -82,19 +74,7 @@ server:
 worker:
   enabled: true
   replicaCount: 1
-  resources:
-    requests:
-      cpu: "500m"
-      memory: "1Gi"
-    limits:
-      cpu: "2"
-      memory: "4Gi"
 
-workloadLauncher:
-  jobMainContainerCpuRequest: "500m"
-  jobMainContainerCpuLimit: "2000m"
-  jobMainContainerMemoryRequest: "512Mi"
-  jobMainContainerMemoryLimit: "4Gi"
 
 airbyte-bootloader:
   enabled: true
@@ -131,23 +111,7 @@ minio:
     rootUser: minio
     rootPassword: minio123
 
-# Resource limits
-resources:
-  limits:
-    cpu: 4000m
-    memory: 8Gi
-  requests:
-    cpu: 1000m
-    memory: 2Gi
-
 # Pod disruption budget
 podDisruptionBudget:
   enabled: true
   minAvailable: 1
-
-# This ensures all containers get proper resources for better performance
-envOverrides:
-  JOB_MAIN_CONTAINER_CPU_REQUEST: "500m"
-  JOB_MAIN_CONTAINER_CPU_LIMIT: "2000m"
-  JOB_MAIN_CONTAINER_MEMORY_REQUEST: "1Gi"
-  JOB_MAIN_CONTAINER_MEMORY_LIMIT: "4Gi"
