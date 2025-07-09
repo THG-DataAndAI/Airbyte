@@ -1,0 +1,49 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: airbyte-resource-limits-patch
+  namespace: airbyte
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "1"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  template:
+    spec:
+      serviceAccountName: airbyte-admin
+      restartPolicy: Never
+      containers:
+      - name: patch-configmap
+        image: bitnami/kubectl:latest
+        command:
+        - /bin/sh
+        - -c
+        - |
+          echo "Patching airbyte-airbyte-env ConfigMap with resource limits..."
+          kubectl patch configmap airbyte-airbyte-env -n airbyte --type merge -p '
+          {
+            "data": {
+              "JOB_MAIN_CONTAINER_CPU_REQUEST": "500m",
+              "JOB_MAIN_CONTAINER_CPU_LIMIT": "2",
+              "JOB_MAIN_CONTAINER_MEMORY_REQUEST": "1Gi",
+              "JOB_MAIN_CONTAINER_MEMORY_LIMIT": "4Gi",
+              "SOURCE_CONTAINER_CPU_REQUEST": "500m",
+              "SOURCE_CONTAINER_CPU_LIMIT": "2",
+              "SOURCE_CONTAINER_MEMORY_REQUEST": "1Gi",
+              "SOURCE_CONTAINER_MEMORY_LIMIT": "4Gi",
+              "DESTINATION_CONTAINER_CPU_REQUEST": "500m",
+              "DESTINATION_CONTAINER_CPU_LIMIT": "2",
+              "DESTINATION_CONTAINER_MEMORY_REQUEST": "1Gi",
+              "DESTINATION_CONTAINER_MEMORY_LIMIT": "4Gi"
+            }
+          }'
+          
+          if [ $? -eq 0 ]; then
+            echo "✅ ConfigMap patched successfully!"
+            echo "Restarting workload-launcher deployment..."
+            kubectl rollout restart deployment airbyte-workload-launcher -n airbyte
+            echo "✅ Workload-launcher restarted!"
+          else
+            echo "❌ Failed to patch ConfigMap"
+            exit 1
+          fi

@@ -1,0 +1,28 @@
+# Add this step to your GitHub workflow after the Helm deployment step
+
+- name: Apply Airbyte Resource Limits Patch
+  run: |
+    echo "Applying resource limits patch to Airbyte ConfigMap..."
+    
+    # Apply the patch job
+    kubectl apply -f post-install-patch-job.yaml
+    
+    # Wait for the job to complete
+    echo "Waiting for patch job to complete..."
+    kubectl wait --for=condition=complete job/airbyte-resource-limits-patch -n airbyte --timeout=60s
+    
+    # Check if the job succeeded
+    if kubectl get job airbyte-resource-limits-patch -n airbyte -o jsonpath='{.status.succeeded}' | grep -q "1"; then
+      echo "✅ Resource limits patch applied successfully!"
+      
+      # Verify the ConfigMap values
+      echo "Verifying ConfigMap values:"
+      kubectl get configmap airbyte-airbyte-env -n airbyte -o yaml | grep -E "(JOB_MAIN|SOURCE|DESTINATION).*CONTAINER"
+    else
+      echo "❌ Patch job failed!"
+      kubectl logs job/airbyte-resource-limits-patch -n airbyte
+      exit 1
+    fi
+    
+    # Clean up the job
+    kubectl delete job airbyte-resource-limits-patch -n airbyte --ignore-not-found=true

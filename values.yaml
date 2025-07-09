@@ -27,23 +27,6 @@ global:
       password: minio123
       existingSecret: ""
       existingSecretKey: ""
-  
-  env_vars:
-    # Main container resources
-    JOB_MAIN_CONTAINER_CPU_REQUEST: "500m"
-    JOB_MAIN_CONTAINER_CPU_LIMIT: "2"
-    JOB_MAIN_CONTAINER_MEMORY_REQUEST: "1Gi"
-    JOB_MAIN_CONTAINER_MEMORY_LIMIT: "4Gi"
-    # Source container resources
-    SOURCE_CONTAINER_CPU_REQUEST: "500m"
-    SOURCE_CONTAINER_CPU_LIMIT: "2"
-    SOURCE_CONTAINER_MEMORY_REQUEST: "1Gi"
-    SOURCE_CONTAINER_MEMORY_LIMIT: "4Gi"
-    # Destination container resources
-    DESTINATION_CONTAINER_CPU_REQUEST: "500m"
-    DESTINATION_CONTAINER_CPU_LIMIT: "2"
-    DESTINATION_CONTAINER_MEMORY_REQUEST: "1Gi"
-    DESTINATION_CONTAINER_MEMORY_LIMIT: "4Gi"
 
 webapp:
   enabled: true
