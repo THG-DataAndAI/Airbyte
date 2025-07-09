@@ -36,25 +36,6 @@ global:
       requests:
         cpu: "500m"
         memory: "1Gi"
-    
-  # Container-specific resource limits
-  jobMainContainer:
-    cpuRequest: "500m"
-    cpuLimit: "2"
-    memoryRequest: "1Gi"
-    memoryLimit: "4Gi"
-  
-  sourceContainer:
-    cpuRequest: "500m"
-    cpuLimit: "2"
-    memoryRequest: "1Gi"
-    memoryLimit: "4Gi"
-    
-  destinationContainer:
-    cpuRequest: "500m"
-    cpuLimit: "2"
-    memoryRequest: "1Gi"
-    memoryLimit: "4Gi"
 
 webapp:
   enabled: true
@@ -87,7 +68,7 @@ server:
     - name: TRACKING_STRATEGY
       value: "segment"
     - name: AIRBYTE_VERSION
-      value: "0.50.0"
+      value: "1.7.1"
     - name: CONFIG_DATABASE_USER
       value: "airbyte"
     - name: CONFIG_DATABASE_PASSWORD
@@ -111,13 +92,6 @@ worker:
 
 workload-launcher:
   enabled: true
-  containerResources:
-    limits:
-      cpu: "2"
-      memory: "4Gi"
-    requests:
-      cpu: "500m"
-      memory: "1Gi"
 
 airbyte-bootloader:
   enabled: true
