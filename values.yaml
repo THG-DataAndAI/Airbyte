@@ -90,8 +90,11 @@ worker:
       cpu: "2"
       memory: "4Gi"
 
-workload-launcher:
-  enabled: true
+workloadLauncher:
+  jobMainContainerCpuRequest: "500m"
+  jobMainContainerCpuLimit: "1000m"
+  jobMainContainerMemoryRequest: "512Mi"
+  jobMainContainerMemoryLimit: "1Gi"
 
 airbyte-bootloader:
   enabled: true
