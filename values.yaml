@@ -27,6 +27,15 @@ global:
       password: minio123
       existingSecret: ""
       existingSecretKey: ""
+  
+  jobs:
+    resources:
+      limits:
+        cpu: "2"
+        memory: "4Gi"
+      requests:
+        cpu: "500m"
+        memory: "1Gi"
 
 webapp:
   enabled: true
@@ -83,6 +92,31 @@ worker:
 
 workload-launcher:
   enabled: true
+  extraEnv:
+    - name: JOB_MAIN_CONTAINER_CPU_REQUEST
+      value: "500m"
+    - name: JOB_MAIN_CONTAINER_CPU_LIMIT
+      value: "2"
+    - name: JOB_MAIN_CONTAINER_MEMORY_REQUEST
+      value: "1Gi"
+    - name: JOB_MAIN_CONTAINER_MEMORY_LIMIT
+      value: "4Gi"
+    - name: SOURCE_CONTAINER_CPU_REQUEST
+      value: "500m"
+    - name: SOURCE_CONTAINER_CPU_LIMIT
+      value: "2"
+    - name: SOURCE_CONTAINER_MEMORY_REQUEST
+      value: "1Gi"
+    - name: SOURCE_CONTAINER_MEMORY_LIMIT
+      value: "4Gi"
+    - name: DESTINATION_CONTAINER_CPU_REQUEST
+      value: "500m"
+    - name: DESTINATION_CONTAINER_CPU_LIMIT
+      value: "2"
+    - name: DESTINATION_CONTAINER_MEMORY_REQUEST
+      value: "1Gi"
+    - name: DESTINATION_CONTAINER_MEMORY_LIMIT
+      value: "4Gi"
 
 airbyte-bootloader:
   enabled: true
