@@ -141,3 +141,31 @@ resources:
 podDisruptionBudget:
   enabled: true
   minAvailable: 1
+
+# Extra Kubernetes objects to deploy with Airbyte
+# This LimitRange ensures all containers get proper resources for better performance
+extraObjects:
+  - apiVersion: v1
+    kind: LimitRange
+    metadata:
+      name: airbyte-performance-limits
+      namespace: airbyte
+    spec:
+      limits:
+      - default:
+          cpu: "4"
+          memory: "8Gi"
+        defaultRequest:
+          cpu: "1"
+          memory: "2Gi"
+        max:
+          cpu: "8"
+          memory: "16Gi"
+        min:
+          cpu: "500m"
+          memory: "1Gi"
+        type: Container
+      - max:
+          cpu: "32"
+          memory: "64Gi"
+        type: Pod
